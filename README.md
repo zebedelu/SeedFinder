@@ -103,4 +103,4 @@ Desert Pyramid, Jungle Temple, Swamp Hut, Igloo, Village, Ocean Ruin, Shipwreck,
 
 ## License
 
-MIT
+Apache 2.0 - License
