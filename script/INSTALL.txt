@@ -1,0 +1,14 @@
+=== SeedFinder - Flarial Client Installation ===
+
+1. Copy SeedFinder.lua to your Flarial scripts directory:
+   %LOCALAPPDATA%\Flarial\Client\Scripts\Modules\
+
+   Full path example:
+   C:\Users\<YourUser>\AppData\Local\Flarial\Client\Scripts\Modules\SeedFinder.lua
+
+2. Restart Flarial Client or reload scripts.
+
+3. SeedFinder will appear in the module list inside Flarial.
+
+NOTE: The SeedFinder server must be running for this script to work.
+See ../server/start.bat to build and start the server.

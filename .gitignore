@@ -1,0 +1,61 @@
+# Build output
+build_bridge/
+build_server/
+build_server_tmp/
+ChunkBiomesGUI/build_test/
+
+# Compiled objects and binaries
+*.o
+*.obj
+*.a
+*.lib
+*.exe
+*.dll
+*.so
+*.dylib
+*.gch
+*.pch
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Makefile
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+*.cmake
+# But NOT CMakeLists.txt (tracked separately)
+
+# IDE files
+.vs/
+.vscode/
+*.suo
+*.user
+*.sln
+*.vcxproj
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ImGui config (generated at runtime)
+imgui.ini
+
+CLAUDE.md
+
+# Git worktrees
+.worktrees/
+
+# PyInstaller build output
+server/dist/
+server/build_spec/
