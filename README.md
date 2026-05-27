@@ -103,4 +103,4 @@ Desert Pyramid, Jungle Temple, Swamp Hut, Igloo, Village, Ocean Ruin, Shipwreck,
 
 ## License
 
-See [ChunkBiomesGUI/LICENSE](ChunkBiomesGUI/LICENSE) for the cubiomes/ChunkBiomesGUI license.
+MIT
