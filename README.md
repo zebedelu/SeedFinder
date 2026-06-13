@@ -70,7 +70,22 @@ REM 3. Output is at server\dist\SeedFinder.exe
 
 ## Supported Structures
 
-Desert Pyramid, Jungle Temple, Swamp Hut, Igloo, Village, Ocean Ruin, Shipwreck, Ocean Monument, Woodland Mansion, Pillager Outpost, Ruined Portal, Ancient City, Buried Treasure, Mineshaft, Desert Well, Geode, Trail Ruins, Trial Chambers
+- Villages
+- Buried Treasures
+- Trail Ruins
+- Ruined Portals
+- Ocean Monuments
+- Jungle Temples
+- Ancient Cities
+- Swamp Huts
+- Igloos
+- Woodland Mansions
+- Desert Temples
+
+## Still without support
+- Ocean Ruins
+- Amethyst Geodes
+- Pillager Outposts
 
 ## API Endpoints
 
