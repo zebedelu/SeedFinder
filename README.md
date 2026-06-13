@@ -1,6 +1,16 @@
 # SeedFinder
 
-Minecraft Bedrock Edition structure finder for [Flarial Client](https://flarial.xyz). Finds nearby villages, temples, monuments, and more — given your world seed and player position.
+## What is SeedFinder?
+
+Is a Minecraft Bedrock Edition structure finder for [Flarial Client](https://flarial.xyz). Finds nearby villages, temples, monuments, and more — given your world seed and player position.
+
+## Screenshots
+![SeedFinder cooking](screenshots/village1.png)
+
+![SeedFinder ancient city](screenshots/ancient_city1.png)
+
+## Compatibility 
+- Minecraft Bedrock (1.18 -> Latest)
 
 ## How It Works
 
@@ -109,6 +119,13 @@ REM 3. Output is at server\dist\SeedFinder.exe
 | | | 17 | Geode |
 | | | 23 | Trail Ruins |
 | | | 24 | Trial Chambers |
+
+## Contributing
+
+Contributions are welcome!  
+Bug reports, feature ideas, pull requests, and documentation improvements are all appreciated.
+
+If you are working on a bigger change, please open an issue first so we can discuss it.
 
 ## Credits
 
