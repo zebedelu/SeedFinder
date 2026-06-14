@@ -20,7 +20,7 @@ For users who just want to run SeedFinder without installing anything:
 
 1. Download `SeedFinder.exe` and `SeedFinder.lua` from [releases](../../releases) 
 2. Run `SeedFinder.exe`
-3. Put the Lua Script in `%localappdata%/Flarial/Client/Scripts/Modules` - or just run the `SeedFinder.lua` script with [Lua](https://lua.org)
+3. Put the Lua Script in `%localappdata%/Flarial/Client/Scripts/Modules`
 4. Enjoy!
 
 No Python, no pip, no MinGW needed.
