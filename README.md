@@ -1,7 +1,8 @@
+<img src="server/logo/logo.ico" height="150">
+
 # SeedFinder For Flarial Client
 
 ## What is SeedFinder?
-
 Is a Minecraft Bedrock Edition structure finder for [Flarial Client](https://flarial.xyz). Finds nearby villages, temples, monuments, and more — given your world seed and player position.
 
 ## Screenshots
