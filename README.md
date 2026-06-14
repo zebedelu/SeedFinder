@@ -1,16 +1,31 @@
-# SeedFinder
+<img src="server/logo/logo.ico" height="150">
+
+# SeedFinder For Flarial Client
 
 ## What is SeedFinder?
-
 Is a Minecraft Bedrock Edition structure finder for [Flarial Client](https://flarial.xyz). Finds nearby villages, temples, monuments, and more — given your world seed and player position.
 
 ## Screenshots
+
 ![SeedFinder cooking](screenshots/village1.png)
 
-![SeedFinder ancient city](screenshots/ancient_city1.png)
+![SeedFinder working](screenshots/ancient_city1.png)
 
 ## Compatibility 
 - Minecraft Bedrock (1.18 -> Latest)
+
+## Quick start
+
+For users who just want to run SeedFinder without installing anything:
+
+1. Download `SeedFinder.exe` and `SeedFinder.lua` from [releases](../../releases) 
+2. Run `SeedFinder.exe`
+3. Put the Lua Script in `%localappdata%/Flarial/Client/Scripts/Modules` - or just run the `SeedFinder.lua` script with [Lua](https://lua.org)
+4. Enjoy!
+
+No Python, no pip, no MinGW needed.
+
+# For developers
 
 ## How It Works
 
@@ -26,18 +41,6 @@ SeedFinder has three components:
 Flarial Lua Script → Flask API (localhost:7890) → seedfinder_lib.dll
    (in Minecraft)         (Python + ctypes)          (C core + cubiomes)
 ```
-
-## Quick Start (No Install)
-
-For users who just want to run SeedFinder without installing anything:
-
-1. Download `SeedFinder.exe` from [releases](../../releases)
-2. Double-click `start_exe.bat` (or run `SeedFinder.exe` directly from Command Prompt)
-3. The server starts on `http://localhost:7890`
-4. Install the Lua script — see [`script/INSTALL.txt`](script/INSTALL.txt)
-5. Open Minecraft with Flarial Client
-
-No Python, no pip, no MinGW needed.
 
 ### Advanced Options
 
@@ -64,7 +67,7 @@ SeedFinder.exe --port 8080 --host 0.0.0.0
 
 3. Open Minecraft with Flarial Client — SeedFinder appears in your modules
 
-## Building the .exe (Developers Only)
+## Building the .exe
 
 If you want to build the exe yourself:
 
