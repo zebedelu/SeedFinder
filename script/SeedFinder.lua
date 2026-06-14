@@ -8,38 +8,7 @@ description = "See structure of the map with the seed, without chunkbase"
 author = "zebedelu"
 
 -- ============================================================================
--- Section 1: Auto-install script
--- ============================================================================
-
-local CoolSeedFinderName = "\27[31mS\27[33me\27[32me\27[36md\27[34mF\27[35mi\27[91mn\27[93md\27[92me\27[96mr\27[0m"
-
-local InstallOutPut = os.getenv("LOCALAPPDATA") .. "\\Flarial\\Client\\Scripts\\Modules"
-local ThisFile = arg and arg[0]
-
-print("Installing "..CoolSeedFinderName.."...")
-
--- Check if diretory exists
-local DirectoryExists_ExitCode = os.rename(InstallOutPut, InstallOutPut)
-if not DirectoryExists_ExitCode then
-	print("\27[31mDirectory not found: " .. InstallOutPut .. "\27[0m")
-	print("Is Flarial Client Installed?")
-	os.exit()
-end
-
-print("Copying "..CoolSeedFinderName..".lua into \27[31mFlarial\27[0m Modules...")
-local CopyFile_ExitCode = os.execute('copy /Y "' .. ThisFile .. '" "' .. InstallOutPut .. '" >nul')
-
-if CopyFile_ExitCode then
-	print("\27[32mDone!\nNow, run Flarial Client\27[0m")
-else
-	print("\27[31mCopy failed.\27[0m")
-end
-
-os.execute("pause")
-os.exit()
-
--- ============================================================================
--- Section 2: HTTP Bridge Integration
+-- Section 1: HTTP Bridge Integration
 -- ============================================================================
 
 local SERVER_URL = "http://127.0.0.1:7890"
@@ -67,7 +36,7 @@ local function checkServer()
 end
 
 -- ============================================================================
--- Section 3: Utility Functions
+-- Section 2: Utility Functions
 -- ============================================================================
 
 local STRUCTURE_TYPES = {
@@ -237,7 +206,7 @@ local function parseScanResponse(jsonStr)
 end
 
 -- ============================================================================
--- Section 4 Settings
+-- Section 3: Settings
 -- ============================================================================
 
 local seedTextBox = settings.addTextBox("Seed", "Enter your world seed (numbers only)", "1", 30)
@@ -281,7 +250,7 @@ local TOGGLE_TYPE_MAP = {
 }
 
 -- ============================================================================
--- Section 5: Manual Settings Persistence (fs-based)
+-- Section 4: Manual Settings Persistence (fs-based)
 -- Flarial's settings API for Lua scripts does NOT persist custom setting values
 -- (sliders, textboxes, toggles, keybinds). Only visual properties are saved.
 -- We use fs.writeFile/readFile to persist our settings manually.
@@ -359,7 +328,7 @@ local function loadSettings()
 end
 
 -- ============================================================================
--- Section 6: Module State
+-- Section 5: Module State
 -- ============================================================================
 
 local scanResults = {}
@@ -371,7 +340,7 @@ local lastDimension = ""
 local rescanKeyHeld = false
 
 -- ============================================================================
--- Section 7: TickEvent Handler
+-- Section 6: TickEvent Handler
 -- ============================================================================
 
 local function onTick()
@@ -475,7 +444,7 @@ local function onTick()
 end
 
 -- ============================================================================
--- Section 8: RenderEvent Handler
+-- Section 7: RenderEvent Handler
 -- ============================================================================
 
 local function onRender()
@@ -515,7 +484,7 @@ local function onRender()
 end
 
 -- ============================================================================
--- Section 9: Module Lifecycle
+-- Section 8: Module Lifecycle
 -- ============================================================================
 
 function onLoad()
@@ -547,7 +516,7 @@ function onDisable()
 end
 
 -- ============================================================================
--- Section 10: Chat Commands
+-- Section 9: Chat Commands
 -- ============================================================================
 
 registerCommand("seedscan", function()
