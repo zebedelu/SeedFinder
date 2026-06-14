@@ -458,7 +458,12 @@ local function onRender()
 
 	if not serverOnline then
 		ImGui.Text("Server offline!")
-		ImGui.Text("Start seedfinder_server.py first")
+		ImGui.Text("Start SeedFinder.exe first")
+		ImGui.Text(" ")
+		ImGui.Text("If you dont have SeedFinder installed")
+		ImGui.Text("visit https://www.github.com/zebedelu/SeedFinder")
+		ImGui.Text("To download the latest one")
+		ImGui.Text(" ")
 		ImGui.Text("URL: " .. SERVER_URL)
 	elseif not currentSeed then
 		ImGui.Text("Enter a seed in settings to begin")
