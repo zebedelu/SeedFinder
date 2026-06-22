@@ -26,5 +26,5 @@ echo.
 echo Keep this window open while using SeedFinder.
 echo The Minecraft mod will connect to http://localhost:7890
 echo.
-python server\seedfinder_server.py --dll-path build_server\seedfinder_lib.dll
+python server\index.py --dll-path build_server\seedfinder_lib.dll
 pause

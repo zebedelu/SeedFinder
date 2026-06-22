@@ -496,7 +496,7 @@ function onLoad()
 	-- Load saved settings from disk (restores values after script reload)
 	loadSettings()
 	log("SeedFinder loaded (HTTP Bridge Edition)")
-	log("Make sure seedfinder_server.py is running on " .. SERVER_URL)
+	log("Make sure index.py is running on " .. SERVER_URL)
 end
 
 function onEnable()
@@ -508,7 +508,7 @@ function onEnable()
 	if not checkServer() then
 		if not serverWarned then
 			serverWarned = true
-			log("SeedFinder: Server offline at " .. SERVER_URL .. ". Start seedfinder_server.py first.")
+			log("SeedFinder: Server offline at " .. SERVER_URL .. ". Start index.py first.")
 		end
 		return
 	end

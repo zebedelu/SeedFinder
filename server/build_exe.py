@@ -44,7 +44,7 @@ def main():
         '--noupx',  # Avoid UPX compression issues with DLLs
         '--console',  # Keep console window visible for logs
         '--icon=../logo/logo.ico',
-        os.path.join(SERVER_DIR, 'seedfinder_server.py'),
+        os.path.join(SERVER_DIR, 'index.py'),
     ]
 
     print('Building SeedFinder.exe with PyInstaller...')
