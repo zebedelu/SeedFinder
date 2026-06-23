@@ -22,6 +22,7 @@ add_library(cubiomes_static STATIC
  ${SEEDFINDER_ROOT}/ChunkBiomesGUI/cubiomes/biomenoise.c
  ${SEEDFINDER_ROOT}/ChunkBiomesGUI/cubiomes/quadbase.c
 )
+target_compile_options(cubiomes_static PRIVATE -fPIC)
 target_include_directories(cubiomes_static PUBLIC
  ${SEEDFINDER_ROOT}/ChunkBiomesGUI/cubiomes
 )
@@ -35,6 +36,7 @@ target_include_directories(bfinders_static PUBLIC
  ${SEEDFINDER_ROOT}/ChunkBiomesGUI/cubiomes
  ${SEEDFINDER_ROOT}/ChunkBiomesGUI
 )
+target_compile_options(bfinders_static PRIVATE -fPIC)
 target_compile_definitions(bfinders_static PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(bfinders_static PUBLIC cubiomes_static)
 
