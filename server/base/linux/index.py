@@ -33,8 +33,8 @@ def _resolve_so_path(cli_so_path):
     # Dev mode: look next to the script (server/base/linux/ -> project root -> build_server/)
     base = os.path.dirname(os.path.abspath(__file__))
     candidates = [
-        os.path.join(base, '..', '..', '..', 'build_server', 'libseedfinder_lib.so'),
         os.path.join(base, '..', '..', '..', 'build_server', 'seedfinder_lib.so'),
+        os.path.join(base, '..', '..', '..', 'build_server', 'libseedfinder_lib.so'),
     ]
     for c in candidates:
         if os.path.isfile(c):

@@ -41,12 +41,14 @@ cmake -S ../core -B . >/dev/null
 make -j"$(nproc)"
 cd ..
 
-if [ ! -f build_server/libseedfinder_lib.so ]; then
+if [ ! -f build_server/seedfinder_lib.so ] && [ ! -f build_server/libseedfinder_lib.so ]; then
     echo
-    echo "ERROR: Build failed — libseedfinder_lib.so not produced."
+    echo "ERROR: Build failed — seedfinder_lib.so / libseedfinder_lib.so not produced."
+    ls build_server/ 2>/dev/null || true
     exit 1
 fi
-echo "Build OK: build_server/libseedfinder_lib.so"
+echo "Build OK:"
+ls build_server/*.so 2>/dev/null
 echo
 
 # [2/2] Start
@@ -55,4 +57,12 @@ echo
 echo "Keep this window open while using SeedFinder."
 echo "The Minecraft mod will connect to http://localhost:7890"
 echo
-exec "$PYTHON" server/base/linux/index.py --so-path build_server/libseedfinder_lib.so
+# Pick whichever .so exists (order matches the resolve order in linux/index.py)
+if [ -f build_server/seedfinder_lib.so ]; then
+    SO_PATH=build_server/seedfinder_lib.so
+elif [ -f build_server/libseedfinder_lib.so ]; then
+    SO_PATH=build_server/libseedfinder_lib.so
+else
+    echo "ERROR: no .so found"; exit 1
+fi
+exec "$PYTHON" server/base/linux/index.py --so-path "$SO_PATH"
