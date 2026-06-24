@@ -45,30 +45,52 @@ HOME_PAGE = """<!doctype html>
 			li {
 				margin-bottom: 6px;
 			}
+            .inputs-grid {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+                max-width: 500px;
+                margin: 0 auto;
+            }
+
+            .max-field {
+                grid-column: 1 / span 2;
+                text-align: center;
+            }
+
+            .max-field input {
+                width: 220px;
+            }
 		</style>
 	</head>
 	<body>
 		<h1>SeedFinder</h1>
-		<div class="field">
-			<label>Seed</label><br />
-			<input id="seed" type="text" value="1" />
-		</div>
-		<div class="field">
-			<label>X</label><br />
-			<input id="x" type="number" value="0" />
-		</div>
-		<div class="field">
-			<label>Z</label><br />
-			<input id="z" type="number" value="0" />
-		</div>
-		<div class="field">
-			<label>Radius (chunks)</label><br />
-			<input id="radius" type="number" value="100" />
-		</div>
-		<div class="field">
-			<label>Maximum Results</label><br />
-			<input id="max" type="number" value="50" />
-		</div>
+		<div class="inputs-grid">
+            <div class="field">
+                <label>Seed</label><br />
+                <input id="seed" type="text" value="1" />
+            </div>
+
+            <div class="field">
+                <label>X</label><br />
+                <input id="x" type="number" value="0" />
+            </div>
+
+            <div class="field">
+                <label>Z</label><br />
+                <input id="z" type="number" value="0" />
+            </div>
+
+            <div class="field">
+                <label>Radius (chunks)</label><br />
+                <input id="radius" type="number" value="100" />
+            </div>
+
+            <div class="field max-field">
+                <label>Maximum Results</label><br />
+                <input id="max" type="number" value="50" />
+            </div>
+        </div>
 		<h3>Structures</h3>
 		<div class="types">
 			<label><input type="checkbox" value="1" /> Desert Pyramid</label>
@@ -103,7 +125,7 @@ HOME_PAGE = """<!doctype html>
 				const types = [...document.querySelectorAll(".types input:checked")]
 					.map((x) => x.value)
 					.join(",");
-				let url = `http://127.0.0.1:7890/scan?seed=${seed}&x=${x}&z=${z}&radius=${radius}&max=${max}`;
+				let url = window.location.href+`scan?seed=${seed}&x=${x}&z=${z}&radius=${radius}&max=${max}`;
 				if (types) url += `&types=${types}`;
 				const results = document.getElementById("results");
 				results.innerHTML = "Loading...";
