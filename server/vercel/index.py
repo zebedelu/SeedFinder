@@ -4,160 +4,6 @@ Loads libseedfinder_bridge.so via ctypes and exposes structure scanning
 as a REST API for the Flarial Lua script to consume via network.get().
 """
 
-HOME_PAGE = """<!doctype html>
-<html lang="en">
-	<head>
-		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>SeedFinder</title>
-		<style>
-			body {
-				font-family: Arial, sans-serif;
-				max-width: 800px;
-				margin: 30px auto;
-				padding: 0 15px;
-			}
-			h1 {
-				text-align: center;
-			}
-			.field {
-				margin: 10px 0;
-			}
-			input[type="text"],
-			input[type="number"] {
-				padding: 5px;
-				width: 220px;
-			}
-			.types {
-				display: grid;
-				grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-				gap: 5px;
-				margin-top: 10px;
-			}
-			button {
-				margin-top: 15px;
-				padding: 8px 16px;
-				cursor: pointer;
-			}
-			#results {
-				margin-top: 25px;
-			}
-			li {
-				margin-bottom: 6px;
-			}
-            .inputs-grid {
-                display: grid;
-                grid-template-columns: repeat(2, 1fr);
-                gap: 10px;
-                max-width: 500px;
-                margin: 0 auto;
-            }
-
-            .max-field {
-                grid-column: 1 / span 2;
-                text-align: center;
-            }
-
-            .max-field input {
-                width: 220px;
-            }
-		</style>
-	</head>
-	<body>
-		<h1>SeedFinder</h1>
-		<div class="inputs-grid">
-            <div class="field">
-                <label>Seed</label><br />
-                <input id="seed" type="text" value="1" />
-            </div>
-
-            <div class="field">
-                <label>X</label><br />
-                <input id="x" type="number" value="0" />
-            </div>
-
-            <div class="field">
-                <label>Z</label><br />
-                <input id="z" type="number" value="0" />
-            </div>
-
-            <div class="field">
-                <label>Radius (chunks)</label><br />
-                <input id="radius" type="number" value="100" />
-            </div>
-
-            <div class="field max-field">
-                <label>Maximum Results</label><br />
-                <input id="max" type="number" value="50" />
-            </div>
-        </div>
-		<h3>Structures</h3>
-		<div class="types">
-			<label><input type="checkbox" value="1" /> Desert Pyramid</label>
-			<label><input type="checkbox" value="2" /> Jungle Temple</label>
-			<label><input type="checkbox" value="3" /> Swamp Hut</label>
-			<label><input type="checkbox" value="4" /> Igloo</label>
-			<label><input type="checkbox" value="5" /> Village</label>
-			<label><input type="checkbox" value="6" /> Ocean Ruin</label>
-			<label><input type="checkbox" value="7" /> Shipwreck</label>
-			<label><input type="checkbox" value="8" /> Monument</label>
-			<label><input type="checkbox" value="9" /> Mansion</label>
-			<label><input type="checkbox" value="10" /> Outpost</label>
-			<label><input type="checkbox" value="11" /> Ruined Portal</label>
-			<label><input type="checkbox" value="12" /> Ruined Portal (Nether)</label>
-			<label><input type="checkbox" value="13" /> Ancient City</label>
-			<label><input type="checkbox" value="14" /> Buried Treasure</label>
-			<label><input type="checkbox" value="15" /> Mineshaft</label>
-			<label><input type="checkbox" value="16" /> Desert Well</label>
-			<label><input type="checkbox" value="17" /> Geode</label>
-			<label><input type="checkbox" value="23" /> Trail Ruins</label>
-			<label><input type="checkbox" value="24" /> Trial Chambers</label>
-		</div>
-		<button onclick="scan()">Scan</button>
-		<div id="results"></div>
-		<script>
-			async function scan() {
-				const seed = document.getElementById("seed").value;
-				const x = document.getElementById("x").value;
-				const z = document.getElementById("z").value;
-				const radius = document.getElementById("radius").value;
-				const max = document.getElementById("max").value;
-				const types = [...document.querySelectorAll(".types input:checked")]
-					.map((x) => x.value)
-					.join(",");
-				let url = window.location.href+`scan?seed=${seed}&x=${x}&z=${z}&radius=${radius}&max=${max}`;
-				if (types) url += `&types=${types}`;
-				const results = document.getElementById("results");
-				results.innerHTML = "Loading...";
-				try {
-					const response = await fetch(url);
-					const data = await response.json();
-					if (!data.results || !data.results.length) {
-						results.innerHTML = "<p>No results found.</p>";
-						return;
-					}
-					let html = "<h3>Results</h3><ul>";
-					for (const item of data.results) {
-						html += `
-                <li>
-                    <b>${item.name}</b>
-                    | X: ${item.x}
-                    | Z: ${item.z}
-                    | Distance: ${item.distance}
-                </li>
-            `;
-					}
-					html += "</ul>";
-					results.innerHTML = html;
-				} catch {
-					results.innerHTML = "<p>Failed to connect to API.</p>";
-				}
-			}
-		</script>
-	</body>
-</html>
-"""
-
 
 import argparse
 import ctypes
@@ -274,6 +120,13 @@ def load_so(so_path):
     _lib.seedfinder_status.restype = ctypes.c_char_p
 
     print(f".so loaded: {so_path}")
+
+HOME_PAGE = "No index.html found."
+try:
+    home_page_file = open("index.html","r+")
+    HOME_PAGE = home_page_file.read()
+except:
+    print(HOME_PAGE)
     
 @app.route("/")
 def index():
