@@ -5,13 +5,9 @@ as a REST API for the Flarial Lua script to consume via network.get().
 """
 
 
-import argparse
-import ctypes
-import json
-import os
-import sys
+import argparse, ctypes, json, os, sys
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -121,18 +117,13 @@ def load_so(so_path):
 
     print(f".so loaded: {so_path}")
 
-HOME_PAGE = "No index.html found."
-try:
-    home_page_file = open("index.html","r+")
-    HOME_PAGE = home_page_file.read()
-except:
-    print(HOME_PAGE)
-    
 @app.route("/")
 def index():
     """If you want to test the API"""
-    return HOME_PAGE
-
+    return send_from_directory(
+        os.path.dirname(os.path.abspath(__file__)),
+        "index.html"
+    )
 
 @app.route("/status")
 def status():
@@ -142,7 +133,6 @@ def status():
         return jsonify(json.loads(result))
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
-
 
 @app.route("/scan")
 def scan():
@@ -241,7 +231,6 @@ def scan():
         return jsonify({"error": f"Invalid JSON from C: {e}"}), 500
 
     return jsonify(result)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SeedFinder HTTP Bridge (Linux)")
