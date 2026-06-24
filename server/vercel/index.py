@@ -174,6 +174,42 @@ CORS(app)
 # Global ctypes library handle
 _lib = None
 
+# Try to load the .so at import time so all routes can use it.
+# On Vercel this is the only chance we get — there's no main().
+def _bootstrap_lib():
+    global _lib
+    base = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(base, 'seedfinder_lib.so'),
+        os.path.join(base, '..', '..', '..', 'build_server', 'seedfinder_lib.so'),
+        os.path.join(base, '..', '..', '..', 'build_server', 'libseedfinder_lib.so'),
+    ]
+    so_path = next((c for c in candidates if os.path.isfile(c)), candidates[0])
+    if not os.path.isfile(so_path):
+        print(f"[seedfinder] .so not found at {so_path}", file=sys.stderr)
+        return
+    try:
+        _lib = ctypes.CDLL(os.path.abspath(so_path))
+        _lib.seedfinder_scan.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_double, ctypes.c_double,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+        ]
+        _lib.seedfinder_scan.restype = ctypes.c_void_p
+        _lib.seedfinder_free_result.argtypes = [ctypes.c_void_p]
+        _lib.seedfinder_free_result.restype = None
+        _lib.seedfinder_status.argtypes = []
+        _lib.seedfinder_status.restype = ctypes.c_char_p
+        print(f"[seedfinder] .so loaded: {so_path}", file=sys.stderr)
+    except OSError as e:
+        print(f"[seedfinder] Failed to load .so: {e}", file=sys.stderr)
+        _lib = None
+
+_bootstrap_lib()
+
 
 def _resolve_so_path(cli_so_path):
     """Resolve the .so path: CLI arg > sys._MEIPASS (frozen) > same-dir fallback.
@@ -267,21 +303,38 @@ def scan():
     max (int) — Maximum results to return (default 20)
     types (string) — Comma-separated structure type IDs (e.g. "5,1,10")
     """
-    try:
-        seed = int(request.args.get("seed", "0"))
-        player_x = float(request.args.get("x", "0"))
-        player_z = float(request.args.get("z", "0"))
-        radius = int(request.args.get("radius", "100"))
-        max_results = int(request.args.get("max", "20"))
-        types_str = request.args.get("types", "5")
-    except (ValueError, TypeError) as e:
-        return jsonify({"error": f"Invalid parameter: {e}"}), 400
+    # Parse params with explicit defaults when missing or empty.
+    missing = []
+    def _arg(name, default, cast):
+        raw = request.args.get(name, "").strip()
+        if not raw:
+            missing.append(name)
+            return default
+        try:
+            return cast(raw)
+        except ValueError:
+            raise ValueError(f"invalid value for {name!r}: {raw!r}")
 
+    try:
+        seed = _arg("seed", "0", int) & 0xFFFFFFFFFFFFFFFF
+        player_x = _arg("x", "0", float)
+        player_z = _arg("z", "0", float)
+        radius = _arg("radius", "100", int)
+        max_results = _arg("max", "20", int)
+        types_str = request.args.get("types", "5").strip() or "5"
+    except ValueError as e:
+        return jsonify({"error": f"Invalid parameter: {e}",
+                        "missing_or_invalid": missing}), 400
+
+    # Surface missing args but still serve a result.
     # Parse types
     try:
         types_list = [int(t.strip()) for t in types_str.split(",") if t.strip()]
     except ValueError:
-        return jsonify({"error": "types must be comma-separated integers"}), 400
+        return jsonify({
+            "error": "types must be comma-separated integers",
+            "missing_or_invalid": missing + ["types"],
+        }), 400
 
     if not types_list:
         return jsonify({"results": []})
@@ -289,6 +342,16 @@ def scan():
     # Build ctypes array
     num_types = len(types_list)
     c_types = (ctypes.c_int * num_types)(*types_list)
+
+    # Bail out early if the native lib failed to load at startup —
+    # otherwise we'd get a confusing 'NoneType has no attribute ...'
+    if _lib is None:
+        return jsonify({
+            "error": "SeedFinder native library (.so) not loaded on this server.",
+            "hint": "Check Vercel build logs for messages starting with [seedfinder].",
+            "missing_or_invalid": missing,
+            "results": [],
+        }), 503
 
     # Call C function — returns void pointer to malloc'd JSON string
     try:
@@ -302,17 +365,19 @@ def scan():
             ctypes.c_int(num_types),
         )
     except Exception as e:
-        return jsonify({"error": f"Scan failed: {e}"}), 500
+        return jsonify({"error": f"Scan failed: {e}",
+                        "missing_or_invalid": missing}), 500
 
     if not raw_ptr:
-        return jsonify({"results": []})
+        return jsonify({"results": [], "missing_or_invalid": missing})
 
     # Read the C string from the pointer, then free it
     try:
         raw_bytes = ctypes.string_at(raw_ptr)
         json_str = raw_bytes.decode("utf-8")
     except Exception as e:
-        return jsonify({"error": f"Failed to read result: {e}"}), 500
+        return jsonify({"error": f"Failed to read result: {e}",
+                        "missing_or_invalid": missing}), 500
     finally:
         _lib.seedfinder_free_result(raw_ptr)
 
