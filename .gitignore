@@ -11,7 +11,7 @@ ChunkBiomesGUI/build_test/
 *.lib
 *.exe
 *.dll
-*.so
+# *.so
 *.dylib
 *.gch
 *.pch
