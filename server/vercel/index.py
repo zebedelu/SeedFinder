@@ -172,8 +172,8 @@ def scan():
         seed = _arg("seed", "0", int) & 0xFFFFFFFFFFFFFFFF
         player_x = _arg("x", "0", float)
         player_z = _arg("z", "0", float)
-        radius = _arg("radius", "100", int)
-        max_results = _arg("max", "20", int)
+        radius = min(_arg("radius", "100", int), 1000)
+        max_results = min(_arg("max", "20", int), 1000)
         types_str = request.args.get("types", "5").strip() or "5"
     except ValueError as e:
         return jsonify({"error": f"Invalid parameter: {e}",
