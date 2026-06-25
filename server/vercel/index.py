@@ -125,6 +125,14 @@ def index():
         "index.html"
     )
 
+@app.route("/seedfinder")
+def seedfinder():
+    """Documentation of the API"""
+    return send_from_directory(
+        os.path.dirname(os.path.abspath(__file__)),
+        "documentation.html"
+    )
+
 @app.route("/status")
 def status():
     """Health check endpoint."""

@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>SeedFinder API</title>
+		<style>
+			html,
+			body {
+				padding: 0;
+				margin: 0;
+			}
+			body {
+				font-family: Arial, sans-serif;
+			}
+			main {
+				justify-self: center;
+				max-width: 1500px;
+				padding: 0 20px 60px;
+			}
+			h1 {
+				text-align: center;
+			}
+			h2 {
+				margin-top: 40px;
+				border-bottom: 2px solid #ccc;
+				padding-bottom: 6px;
+			}
+			h3 {
+				margin-top: 24px;
+			}
+			p,
+			li {
+				line-height: 1.55;
+			}
+			code,
+			pre {
+				font-family: "Consolas", "Courier New", monospace;
+			}
+			pre {
+				background: #1e1e1e;
+				color: #f5f5f5;
+				padding: 16px;
+				border-radius: 6px;
+				overflow-x: auto;
+				font-size: 14px;
+				line-height: 1.45;
+			}
+			pre code {
+				color: inherit;
+				background: transparent;
+			}
+			.code-block {
+				position: relative;
+			}
+			.code-block pre {
+				margin: 0 0 8px 0;
+			}
+			.copy-btn {
+				position: absolute;
+				top: 6px;
+				right: 6px;
+				background: #444;
+				color: #fff;
+				border: none;
+				padding: 4px 8px;
+				font-size: 12px;
+				cursor: pointer;
+				border-radius: 4px;
+				opacity: 0.7;
+			}
+			.copy-btn:hover {
+				opacity: 1;
+			}
+			.copy-btn.ok {
+				background: #2d8a3e;
+			}
+			.lang-tabs {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 4px;
+				margin: 12px 0 8px 0;
+			}
+			.lang-tabs button {
+				background: #eee;
+				border: 1px solid #bbb;
+				padding: 6px 12px;
+				cursor: pointer;
+				border-radius: 4px;
+				font-size: 13px;
+			}
+			.lang-tabs button.active {
+				background: #333;
+				color: #fff;
+				border-color: #333;
+			}
+			table {
+				border-collapse: collapse;
+				width: 100%;
+				margin: 12px 0;
+			}
+			th,
+			td {
+				border: 1px solid #ccc;
+				padding: 8px;
+				text-align: left;
+				vertical-align: top;
+			}
+			th {
+				background: #f4f4f4;
+			}
+			td code {
+				background: #f4f4f4;
+				padding: 1px 4px;
+				border-radius: 3px;
+			}
+			.note {
+				background: #fffbe6;
+				border-left: 4px solid #f5c518;
+				padding: 10px 14px;
+				margin: 12px 0;
+				border-radius: 3px;
+			}
+			.credits {
+				position: fixed;
+				bottom: 1%;
+				color: grey;
+				font-size: 90%;
+				left: 1%;
+			}
+			.logo {
+				height: 50px;
+				padding: 10px;
+			}
+			.nav {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				height: 100%;
+				border-bottom: 2px solid black;
+			}
+			.page-link {
+				padding: 30px;
+				transition: 0.3s ease;
+				text-decoration: none;
+				color: black;
+			}
+			.unavaiable {
+				color: grey;
+				text-decoration: line-through;
+			}
+		</style>
+	</head>
+	<body>
+		<nav class="nav">
+			<img
+				src="https://github.com/zebedelu/SeedFinder/raw/main/server/logo/logo.ico"
+				class="logo"
+			/>
+			<div>
+				<a class="page-link" href="/">Home</a>
+				<a class="page-link unavaiable">SeedCracker (coming soon)</a>
+				<a class="page-link" href="seedfinder">SeedFinder API</a>
+			</div>
+		</nav>
+		<main>
+			<h1>SeedFinder API</h1>
+			<p>
+				SeedFinder is a REST API that finds nearby Minecraft Bedrock structures
+				for a given world seed and player position. All endpoints return JSON
+				and are reachable at
+				<br>
+				<code>https://mineseedfinder.vercel.app</code>.
+			</p>
+
+			<h2>Base URL</h2>
+			<pre><code>https://mineseedfinder.vercel.app</code></pre>
+
+			<h2>Endpoints</h2>
+
+			<h3><code>GET /status</code></h3>
+			<p>
+				Health check. Returns whether the native library was loaded and its
+				version.
+			</p>
+			<p><strong>Response 200:</strong></p>
+			<pre><code>{
+  "ok": true,
+  "version": "..."
+}</code></pre>
+			<p><strong>Response 500:</strong></p>
+			<pre><code>{
+  "status": "error",
+  "message": "..."
+}</code></pre>
+
+			<h3><code>GET /scan</code></h3>
+			<p>Scan for structures near the given position.</p>
+
+			<table>
+				<thead>
+					<tr>
+						<th>Query param</th>
+						<th>Type</th>
+						<th>Default</th>
+						<th>Description</th>
+					</tr>
+				</thead>
+				<tbody>
+					<tr>
+						<td><code>seed</code></td>
+						<td>int (uint64)</td>
+						<td><code>0</code></td>
+						<td>World seed.</td>
+					</tr>
+					<tr>
+						<td><code>x</code></td>
+						<td>float</td>
+						<td><code>0</code></td>
+						<td>Player X block position.</td>
+					</tr>
+					<tr>
+						<td><code>z</code></td>
+						<td>float</td>
+						<td><code>0</code></td>
+						<td>Player Z block position.</td>
+					</tr>
+					<tr>
+						<td><code>radius</code></td>
+						<td>int</td>
+						<td><code>100</code></td>
+						<td>Search radius in chunks. Clamped to <code>1000</code>.</td>
+					</tr>
+					<tr>
+						<td><code>max</code></td>
+						<td>int</td>
+						<td><code>20</code></td>
+						<td>Maximum results to return. Clamped to <code>1000</code>.</td>
+					</tr>
+					<tr>
+						<td><code>types</code></td>
+						<td>string</td>
+						<td><code>5</code></td>
+						<td>Comma-separated structure type IDs.</td>
+					</tr>
+				</tbody>
+			</table>
+
+			<div class="note">
+				Any parameter that is missing or unparseable is replaced with its
+				default. The response include
+			</div>
+		</main>
+	</body>
+</html>

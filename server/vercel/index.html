@@ -5,12 +5,18 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>SeedFinder</title>
 		<style>
+			html,
+			body {
+				padding: 0;
+				margin: 0;
+			}
 			body {
 				font-family: Arial, sans-serif;
-				max-width: 800px;
-				margin: 30px auto;
-				padding: 0 15px;
 			}
+            main {
+                justify-self: center;
+                max-width: 1500px;
+            }
 			h1 {
 				text-align: center;
 			}
@@ -39,86 +45,133 @@
 			li {
 				margin-bottom: 6px;
 			}
-            .inputs-grid {
-                display: grid;
-                grid-template-columns: repeat(2, 1fr);
-                gap: 10px;
-                max-width: 500px;
-                margin: 0 auto;
-            }
+			.inputs-grid {
+				display: grid;
+				grid-template-columns: repeat(2, 1fr);
+				gap: 10px;
+				max-width: 500px;
+				margin: 0 auto;
+			}
 
-            .max-field {
-                grid-column: 1 / span 2;
-                text-align: center;
-            }
+			.max-field {
+				grid-column: 1 / span 2;
+				text-align: center;
+			}
 
-            .max-field input {
-                width: 220px;
+			.max-field input {
+				width: 220px;
+			}
+			.credits {
+				position: fixed;
+				bottom: 1%;
+				color: grey;
+				font-size: 90%;
+				left: 1%;
+			}
+			.logo {
+				height: 50px;
+                padding: 10px;
+			}
+			.nav {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+				height: 100%;
+				border-bottom: 2px solid black;
+			}
+            .page-link {
+                padding: 30px;
+                transition: 0.3s ease;
+                text-decoration: none;
+                color: black;
             }
-            .credits {
-                position: fixed;
-                bottom: 1%;
+            .unavaiable {
                 color: grey;
-                font-size: 90%;
-                left: 1%;
+                text-decoration: line-through;
+            }
+            .logo-div {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                text-decoration: none;
+                color: black;
             }
 		</style>
 	</head>
 	<body>
-		<h1>SeedFinder</h1>
-		<div class="inputs-grid">
-            <div class="field">
-                <label>Seed</label><br />
-                <input id="seed" type="text" value="1" />
+		<nav class="nav">
+			<a href="https://github.com/zebedelu/SeedFinder" class="logo-div"> 
+                <img
+                    src="https://github.com/zebedelu/SeedFinder/raw/main/server/logo/logo.ico"
+                    class="logo"
+                />
+                <p>SeedFinder</p>
+            </a>
+            <div>
+                <a class="page-link" href="">Home</a>
+                <a class="page-link unavaiable">SeedCracker (coming soon)</a>
+                <a class="page-link" href="seedfinder">SeedFinder API</a>
             </div>
+		</nav>
+		<main>
+			<h1>Test SeedFinder</h1>
+			<div class="inputs-grid">
+				<div class="field">
+					<label>Seed</label><br />
+					<input id="seed" type="text" value="1" />
+				</div>
 
-            <div class="field">
-                <label>X</label><br />
-                <input id="x" type="number" value="0" />
-            </div>
+				<div class="field">
+					<label>X</label><br />
+					<input id="x" type="number" value="0" />
+				</div>
 
-            <div class="field">
-                <label>Z</label><br />
-                <input id="z" type="number" value="0" />
-            </div>
+				<div class="field">
+					<label>Z</label><br />
+					<input id="z" type="number" value="0" />
+				</div>
 
-            <div class="field">
-                <label>Radius (chunks)</label><br />
-                <input id="radius" type="number" value="100" />
-            </div>
+				<div class="field">
+					<label>Radius (chunks)</label><br />
+					<input id="radius" type="number" value="100" />
+				</div>
 
-            <div class="field max-field">
-                <label>Maximum Results</label><br />
-                <input id="max" type="number" value="50" />
-            </div>
-        </div>
-		<h3>Structures</h3>
-		<div class="types">
-			<label><input type="checkbox" value="1" /> Desert Pyramid</label>
-			<label><input type="checkbox" value="2" /> Jungle Temple</label>
-			<label><input type="checkbox" value="3" /> Swamp Hut</label>
-			<label><input type="checkbox" value="4" /> Igloo</label>
-			<label><input type="checkbox" value="5" /> Village</label>
-			<label><input type="checkbox" value="6" /> Ocean Ruin</label>
-			<label><input type="checkbox" value="7" /> Shipwreck</label>
-			<label><input type="checkbox" value="8" /> Monument</label>
-			<label><input type="checkbox" value="9" /> Mansion</label>
-			<label><input type="checkbox" value="10" /> Outpost</label>
-			<label><input type="checkbox" value="11" /> Ruined Portal</label>
-			<label><input type="checkbox" value="12" /> Ruined Portal (Nether)</label>
-			<label><input type="checkbox" value="13" /> Ancient City</label>
-			<label><input type="checkbox" value="14" /> Buried Treasure</label>
-			<label><input type="checkbox" value="15" /> Mineshaft</label>
-			<label><input type="checkbox" value="16" /> Desert Well</label>
-			<label><input type="checkbox" value="17" /> Geode</label>
-			<label><input type="checkbox" value="23" /> Trail Ruins</label>
-			<label><input type="checkbox" value="24" /> Trial Chambers</label>
-		</div>
-		<button onclick="scan()">Scan</button>
-		<div id="results"></div>
-        <p class="credits left">Credits on Github
-            <a href="https://github.com/zebedelu" target="_blank">@zebedelu</a>. 
-        </p>
+				<div class="field max-field">
+					<label>Maximum Results</label><br />
+					<input id="max" type="number" value="50" />
+				</div>
+			</div>
+			<h3>Structures</h3>
+			<div class="types">
+				<label><input type="checkbox" value="1" /> Desert Pyramid</label>
+				<label><input type="checkbox" value="2" /> Jungle Temple</label>
+				<label><input type="checkbox" value="3" /> Swamp Hut</label>
+				<label><input type="checkbox" value="4" /> Igloo</label>
+				<label><input type="checkbox" value="5" /> Village</label>
+				<label><input type="checkbox" value="6" /> Ocean Ruin</label>
+				<label><input type="checkbox" value="7" /> Shipwreck</label>
+				<label><input type="checkbox" value="8" /> Monument</label>
+				<label><input type="checkbox" value="9" /> Mansion</label>
+				<label><input type="checkbox" value="10" /> Outpost</label>
+				<label><input type="checkbox" value="11" /> Ruined Portal</label>
+				<label
+					><input type="checkbox" value="12" /> Ruined Portal (Nether)</label
+				>
+				<label><input type="checkbox" value="13" /> Ancient City</label>
+				<label><input type="checkbox" value="14" /> Buried Treasure</label>
+				<label><input type="checkbox" value="15" /> Mineshaft</label>
+				<label><input type="checkbox" value="16" /> Desert Well</label>
+				<label><input type="checkbox" value="17" /> Geode</label>
+				<label><input type="checkbox" value="23" /> Trail Ruins</label>
+				<label><input type="checkbox" value="24" /> Trial Chambers</label>
+			</div>
+			<button onclick="scan()">Scan</button>
+			<div id="results"></div>
+			<p class="credits left">
+				Credits on Github
+				<a href="https://github.com/zebedelu" target="_blank">@zebedelu</a>.
+			</p>
+		</main>
 		<script>
 			async function scan() {
 				const seed = document.getElementById("seed").value;
@@ -129,7 +182,9 @@
 				const types = [...document.querySelectorAll(".types input:checked")]
 					.map((x) => x.value)
 					.join(",");
-				let url = window.location.href+`scan?seed=${seed}&x=${x}&z=${z}&radius=${radius}&max=${max}`;
+				let url =
+					window.location.href +
+					`scan?seed=${seed}&x=${x}&z=${z}&radius=${radius}&max=${max}`;
 				if (types) url += `&types=${types}`;
 				const results = document.getElementById("results");
 				results.innerHTML = "Loading...";
