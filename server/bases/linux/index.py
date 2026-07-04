@@ -163,7 +163,7 @@ def _resolve_so_path(cli_so_path):
     if getattr(sys, 'frozen', False):
         return os.path.join(sys._MEIPASS, 'libseedfinder_bridge.so')
 
-    # Dev mode: look next to the script (server/base/linux/ -> project root -> build_server/)
+    # Dev mode: look next to the script (server/bases/linux/ -> project root -> build_server/)
     base = os.path.dirname(os.path.abspath(__file__))
     candidates = [
         os.path.join(base, '..', '..', '..', 'build_server', 'seedfinder_lib.so'),

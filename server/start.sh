@@ -65,4 +65,4 @@ elif [ -f build_server/libseedfinder_lib.so ]; then
 else
     echo "ERROR: no .so found"; exit 1
 fi
-exec "$PYTHON" server/base/linux/index.py --so-path "$SO_PATH"
+exec "$PYTHON" server/bases/linux/index.py --so-path "$SO_PATH"

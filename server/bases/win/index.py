@@ -161,7 +161,7 @@ def _resolve_dll_path(cli_dll_path):
     if getattr(sys, 'frozen', False):
         return os.path.join(sys._MEIPASS, 'seedfinder_lib.dll')
 
-    # Dev mode: look next to the script (server/base/win/ -> project root -> build_server/)
+    # Dev mode: look next to the script (server/bases/win/ -> project root -> build_server/)
     return os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         '..', '..', '..', 'build_server', 'seedfinder_lib.dll')
 

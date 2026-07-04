@@ -15,7 +15,7 @@ ChunkBiomesGUI/build_test/
 *.dylib
 *.gch
 *.pch
-# But track the Linux .so used by server/base/linux/index.py
+# But track the Linux .so used by server/bases/linux/index.py
 !build_server/*.so
 
 # CMake generated files

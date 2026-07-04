@@ -64,7 +64,7 @@ def _resolve_so_path(cli_so_path):
         return os.path.join(sys._MEIPASS, 'libseedfinder_bridge.so')
 
     # Dev mode: look next to the script (server/vercel/ when deployed to Vercel,
-    # or server/base/linux/ when running locally inside the repo).
+    # or server/bases/linux/ when running locally inside the repo).
     base = os.path.dirname(os.path.abspath(__file__))
     candidates = [
         # Vercel deploy: .so is colocated with index.py
