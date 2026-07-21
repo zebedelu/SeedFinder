@@ -13,12 +13,12 @@ import shutil
 import subprocess
 import sys
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../'))
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..\\..\\..\\'))
 SERVER_DIR = os.path.join(ROOT, 'server')
 DLL_PATH = os.path.join(ROOT, 'build_server', 'seedfinder_lib.dll')
 DIST_DIR = os.path.join(SERVER_DIR, 'dist')
 SPEC_DIR = os.path.join(SERVER_DIR, 'build_spec')
-INDEX_FILE = os.path.join(SERVER_DIR, 'base/win/index.py')
+INDEX_FILE = os.path.join(SERVER_DIR, 'bases\\win\\index.py')
 
 def main():
     if not os.path.isfile(DLL_PATH):

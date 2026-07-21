@@ -1,0 +1,25 @@
+
+nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 100%;
+    border-bottom: 2px solid black;
+}
+.logo {
+    height: 50px;
+    padding: 10px;
+}
+.page-link {
+    padding: 30px;
+    transition: 0.3s ease;
+    text-decoration: none;
+    color: black;
+}
+.logo-div {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    color: black;
+}

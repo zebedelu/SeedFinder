@@ -2,166 +2,26 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
+		<meta name="google-site-verification" content="WDovu9v4gX8TjIDUL07adTRR4CUDi5XbuNpkLFhy5lI">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>SeedFinder API</title>
-		<style>
-			html,
-			body {
-				padding: 0;
-				margin: 0;
-			}
-			body {
-				font-family: Arial, sans-serif;
-			}
-			main {
-				justify-self: center;
-				max-width: 900px;
-				padding: 0 20px 60px;
-			}
-			h1 {
-				text-align: center;
-			}
-			h2 {
-				margin-top: 40px;
-				border-bottom: 2px solid #ccc;
-				padding-bottom: 6px;
-			}
-			h3 {
-				margin-top: 24px;
-			}
-			p,
-			li {
-				line-height: 1.55;
-			}
-			code,
-			pre {
-				font-family: "Consolas", "Courier New", monospace;
-			}
-			pre {
-				background: #1e1e1e;
-				color: #f5f5f5;
-				padding: 16px;
-				border-radius: 6px;
-				overflow-x: auto;
-				font-size: 14px;
-				line-height: 1.45;
-			}
-			pre code {
-				color: inherit;
-				background: transparent;
-			}
-			.code-block {
-				position: relative;
-			}
-			.code-block pre {
-				margin: 0 0 8px 0;
-			}
-			.copy-btn {
-				position: absolute;
-				top: 6px;
-				right: 6px;
-				background: #444;
-				color: #fff;
-				border: none;
-				padding: 4px 8px;
-				font-size: 12px;
-				cursor: pointer;
-				border-radius: 4px;
-				opacity: 0.7;
-			}
-			.copy-btn:hover {
-				opacity: 1;
-			}
-			.copy-btn.ok {
-				background: #2d8a3e;
-			}
-			.lang-tabs {
-				display: flex;
-				flex-wrap: wrap;
-				gap: 4px;
-				margin: 12px 0 8px 0;
-			}
-			.lang-tabs button {
-				background: #eee;
-				border: 1px solid #bbb;
-				padding: 6px 12px;
-				cursor: pointer;
-				border-radius: 4px;
-				font-size: 13px;
-			}
-			.lang-tabs button.active {
-				background: #333;
-				color: #fff;
-				border-color: #333;
-			}
-			table {
-				border-collapse: collapse;
-				width: 100%;
-				margin: 12px 0;
-			}
-			th,
-			td {
-				border: 1px solid #ccc;
-				padding: 8px;
-				text-align: left;
-				vertical-align: top;
-			}
-			th {
-				background: #f4f4f4;
-			}
-			td code {
-				background: #f4f4f4;
-				padding: 1px 4px;
-				border-radius: 3px;
-			}
-			.note {
-				background: #fffbe6;
-				border-left: 4px solid #f5c518;
-				padding: 10px 14px;
-				margin: 12px 0;
-				border-radius: 3px;
-			}
-			.credits {
-				position: fixed;
-				bottom: 1%;
-				color: grey;
-				font-size: 90%;
-				left: 1%;
-			}
-			.logo {
-				height: 50px;
-				padding: 10px;
-			}
-			.nav {
-				display: flex;
-				justify-content: space-between;
-				align-items: center;
-				height: 100%;
-				border-bottom: 2px solid black;
-			}
-			.page-link {
-				padding: 30px;
-				transition: 0.3s ease;
-				text-decoration: none;
-				color: black;
-			}
-			.unavaiable {
-				color: grey;
-				text-decoration: line-through;
-			}
-		</style>
+		<title>SeedFinder Documentation</title>
+		<link rel="stylesheet" href="{{ url_for('static', filename='style/index.css') }}">
+		<link rel="stylesheet" href="{{ url_for('static', filename='style/nav.css') }}">
 	</head>
 	<body>
 		<nav class="nav">
-			<img
-				src="https://github.com/zebedelu/SeedFinder/raw/main/server/logo/logo.ico"
-				class="logo"
-			/>
-			<div>
-				<a class="page-link" href="/">Home</a>
-				<a class="page-link unavaiable">SeedCracker (coming soon)</a>
-				<a class="page-link" href="seedfinder">SeedFinder API</a>
-			</div>
+			<a href="https://github.com/zebedelu/SeedFinder" class="logo-div"> 
+                <img
+                    src="https://github.com/zebedelu/SeedFinder/raw/main/server/logo/logo.ico"
+                    class="logo"
+                />
+                <p>SeedFinder</p>
+            </a>
+            <div>
+                <a class="page-link" href="">Home</a>
+                <a class="page-link unavaiable">SeedCracker (coming soon)</a>
+                <a class="page-link" href="seedfinder">SeedFinder API</a>
+            </div>
 		</nav>
 		<main>
 			<h1>SeedFinder API</h1>

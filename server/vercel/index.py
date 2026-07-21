@@ -7,7 +7,7 @@ as a REST API for the Flarial Lua script to consume via network.get().
 
 import argparse, ctypes, json, os, sys
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, render_template
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -117,20 +117,21 @@ def load_so(so_path):
 
     print(f".so loaded: {so_path}")
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 @app.route("/")
 def index():
-    """If you want to test the API"""
-    return send_from_directory(
-        os.path.dirname(os.path.abspath(__file__)),
-        "index.html"
-    )
+    return render_template("index.html")
 
 @app.route("/seedfinder")
 def seedfinder():
-    """Documentation of the API"""
+    return render_template("documentation.html")
+
+@app.route("/style/<path:filename>")
+def styles(filename):
     return send_from_directory(
-        os.path.dirname(os.path.abspath(__file__)),
-        "documentation.html"
+        os.path.join(BASE_DIR, "style"),
+        filename
     )
 
 @app.route("/status")

@@ -2,101 +2,11 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
+		<meta name="google-site-verification" content="WDovu9v4gX8TjIDUL07adTRR4CUDi5XbuNpkLFhy5lI">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>SeedFinder</title>
-		<style>
-			html,
-			body {
-				padding: 0;
-				margin: 0;
-			}
-			body {
-				font-family: Arial, sans-serif;
-			}
-            main {
-                justify-self: center;
-                max-width: 1500px;
-            }
-			h1 {
-				text-align: center;
-			}
-			.field {
-				margin: 10px 0;
-			}
-			input[type="text"],
-			input[type="number"] {
-				padding: 5px;
-				width: 220px;
-			}
-			.types {
-				display: grid;
-				grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-				gap: 5px;
-				margin-top: 10px;
-			}
-			button {
-				margin-top: 15px;
-				padding: 8px 16px;
-				cursor: pointer;
-			}
-			#results {
-				margin-top: 25px;
-			}
-			li {
-				margin-bottom: 6px;
-			}
-			.inputs-grid {
-				display: grid;
-				grid-template-columns: repeat(2, 1fr);
-				gap: 10px;
-				max-width: 500px;
-				margin: 0 auto;
-			}
-
-			.max-field {
-				grid-column: 1 / span 2;
-				text-align: center;
-			}
-
-			.max-field input {
-				width: 220px;
-			}
-			.credits {
-				position: fixed;
-				bottom: 1%;
-				color: grey;
-				font-size: 90%;
-				left: 1%;
-			}
-			.logo {
-				height: 50px;
-                padding: 10px;
-			}
-			.nav {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-				height: 100%;
-				border-bottom: 2px solid black;
-			}
-            .page-link {
-                padding: 30px;
-                transition: 0.3s ease;
-                text-decoration: none;
-                color: black;
-            }
-            .unavaiable {
-                color: grey;
-                text-decoration: line-through;
-            }
-            .logo-div {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                text-decoration: none;
-                color: black;
-            }
-		</style>
+		<title>SeedFinder Home</title>
+		<link rel="stylesheet" href="{{ url_for('static', filename='style/index.css') }}">
+		<link rel="stylesheet" href="{{ url_for('static', filename='style/nav.css') }}">
 	</head>
 	<body>
 		<nav class="nav">
@@ -208,8 +118,8 @@
 					}
 					html += "</ul>";
 					results.innerHTML = html;
-				} catch {
-					results.innerHTML = "<p>Failed to connect to API.</p>";
+				} catch (ex) {
+					results.innerHTML = `<p>Failed to connect to API.<br>${ex}</p>`;
 				}
 			}
 		</script>
