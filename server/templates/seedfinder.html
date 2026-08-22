@@ -83,7 +83,7 @@
 		try {
 			const r = await fetch("/status");
 			const d = await r.json();
-			if (r.ok && d.ok) {
+			if (r.ok && d.status === "ok") {
 				chip.className = "chip ok";
 				chip.innerHTML = `<i></i> API online${d.version ? " · " + d.version : ""}`;
 			} else {
