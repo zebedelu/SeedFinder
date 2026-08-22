@@ -11,6 +11,7 @@ api_bp = Blueprint("api", __name__)
 
 
 @api_bp.route("/status")
+@api_bp.route("/health")
 def status():
     """Health check endpoint."""
     try:
