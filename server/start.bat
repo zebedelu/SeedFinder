@@ -43,7 +43,7 @@ echo Keep this window open while using SeedFinder.
 echo The Minecraft mod will connect to http://localhost:7890
 echo.
 echo Serving the same web pages as the Vercel deployment
-echo (server\vercel\index.py, pages: templates\*, CSS: static\style\*)
+echo (server\index.py, pages: templates\*, CSS: static\style\*)
 echo.
-python server\vercel\index.py --so-path build_server\seedfinder_lib.dll
+python server\index.py --lib-path build_server\seedfinder_lib.dll
 pause

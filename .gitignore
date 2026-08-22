@@ -11,12 +11,10 @@ ChunkBiomesGUI/build_test/
 *.lib
 *.exe
 *.dll
-# *.so
+# *.so  (the Vercel library server/seedfinder_lib.so is tracked on purpose)
 *.dylib
 *.gch
 *.pch
-# But track the Linux .so used by server/bases/linux/index.py
-!build_server/*.so
 
 # CMake generated files
 CMakeCache.txt
@@ -44,11 +42,28 @@ __pycache__/
 *$py.class
 .venv/
 venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.cache/
+.coverage
+htmlcov/
+*.log
+*.egg-info/
+.eggs/
 
 # OS files
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Env / IDE
+.env
+.env.*
+!.env.example
+.idea/
+*.iml
 
 # ImGui config (generated at runtime)
 imgui.ini

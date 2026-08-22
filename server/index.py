@@ -6,7 +6,6 @@ runtimes call. Running the file directly starts a local dev server.
 
 import argparse
 import os
-import sys
 
 from app import create_app, native
 
@@ -14,11 +13,11 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="SeedFinder HTTP Bridge (Linux)")
+    parser = argparse.ArgumentParser(description="SeedFinder HTTP Bridge")
     parser.add_argument(
-        "--so-path",
+        "--lib-path",
         default=None,
-        help="Path to seedfinder_lib.so (auto-detected if omitted)",
+        help="Path to seedfinder_lib.dll/.so (auto-detected if omitted)",
     )
     parser.add_argument(
         "--port",
@@ -33,16 +32,14 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    def _resolve(so_path):
-        if so_path:
-            return so_path
-        if getattr(sys, "frozen", False):
-            return os.path.join(sys._MEIPASS, "seedfinder_lib.so")
+    def _resolve(lib_path):
+        if lib_path:
+            return lib_path
         # bootstrap_lib() already tried the same candidates at import time;
-        # default to the colocated .so whenever it exists.
+        # default to the first one that actually exists.
         return next((c for c in native._candidates() if os.path.isfile(c)),
                     native._candidates()[0])
 
-    native.load_so(_resolve(args.so_path))
+    native.load_lib(_resolve(args.lib_path))
     print(f"SeedFinder server starting on http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=False)

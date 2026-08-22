@@ -146,7 +146,7 @@ Flarial Lua Script  --HTTP-->  Flask server  --ctypes-->  seedfinder_lib (.so / 
 ```
 
 1. **C core** (`core/`) — `seedfinder_wrapper.c` links cubiomes statically and implements `seedfinder_scan()`. For each requested structure type it walks the relevant grid regions around the player within `radius`, checks biome viability, computes distance, sorts, caps at `max`, and returns a hand-built JSON string across the ABI boundary (freed afterward with `seedfinder_free_result`).
-2. **HTTP server** (`server/`) — a small Flask app loads that shared library and exposes `/status` and `/scan`. It exists in three near-identical copies: `server/bases/win/index.py` (packaged into `SeedFinder.exe`), `server/bases/linux/index.py` (local Linux dev), and `server/vercel/index.py` (what runs behind `mineseedfinder.vercel.app`). The Vercel one is slightly more defensive — see the note in [API reference](#api-reference).
+2. **HTTP server** (`server/`) — a single Flask app package (`server/app/`) loads that shared library and exposes `/status` and `/scan`. One codebase serves every deployment: `server/index.py` is the WSGI entry (Vercel root directory is `server/`), the same file runs locally on Windows and Linux via `server/start.bat` / `server/start.sh`, and it's what gets frozen into `SeedFinder.exe` by `server/build_exe.py`.
 3. **Flarial script** (`script/SeedFinder.lua`) — polls `/status`, calls `/scan` with the player's live coordinates, and draws the results in an ImGui panel with a name-to-icon lookup.
 
 There's also an experimental fourth path in `core/SeedFinderBridge.cpp` / `.h`: a direct Lua↔C bridge meant to be compiled straight into the Flarial Client DLL, cutting out the HTTP hop entirely. It's set up in `CMakeLists.txt` but the shipped Lua script doesn't use it yet — see [Roadmap](#roadmap).
@@ -190,7 +190,7 @@ Error responses:
 { "error": "SeedFinder native library (.so) not loaded on this server.", "results": [] }
 ```
 
-**One real difference between the deployments, worth knowing if you're integrating:** the hosted `mineseedfinder.vercel.app` clamps `radius` and `max` to `1000` and includes a `missing_or_invalid` array listing any params it had to default. The local server that ships with the `.exe` and the Flarial module — `server/bases/win/index.py` and `server/bases/linux/index.py` — does **not** do either of those things; `radius` and `max` are passed straight through uncapped, and there's no `missing_or_invalid` field. In practice this means a stray `radius=50000` against your own local server won't be stopped for you the way it would be on the hosted API. The scan route logic is otherwise identical between all three files.
+All deployments run the same app package, so behavior is identical everywhere: `radius` and `max` are clamped to `1000`, and a `missing_or_invalid` array lists any params that had to be defaulted (e.g. a stray `radius=50000` is capped rather than let through).
 
 The local server also serves a tiny HTML form at `/` if you'd rather click through a request than type a `curl` command.
 
@@ -252,7 +252,7 @@ REM Output: server\dist\SeedFinder.exe
 
 I ran these myself against the real compiled engine, not estimated:
 
-- Binary tested: `build_server/seedfinder_lib.so`, built from this repo's own source, served through `server/bases/linux/index.py` (Flask's built-in dev server, same as the project ships — no custom harness).
+- Binary tested: `build_server/seedfinder_lib.so`, built from this repo's own source, served through `server/index.py` (Flask's built-in dev server, same as the project ships — no custom harness).
 - Timed with `curl -w "%{time_total}"` against `localhost`, so this is engine + Flask overhead, network latency excluded.
 - 5 requests per scenario, average shown. There's no caching in the code, so every request does a full scan.
 - Environment: single-vCPU Intel Xeon @ 2.10 GHz container, Ubuntu 24.04.4, Python 3.12.3, Flask 3.1.3, measured July 4, 2026. That's a modest single core — expect quicker results on a real desktop. The server is also single-threaded by default (Flask's dev server), so it won't spread a scan across multiple cores regardless of what's available.

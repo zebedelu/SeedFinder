@@ -1,4 +1,4 @@
-"""Native library (.so) loading and ctypes bindings.
+"""Native library loading and ctypes bindings.
 
 All ctypes plumbing lives here so route modules only deal with a single
 loadable handle (`native.lib`, or `None` when the library could not load).
@@ -33,42 +33,47 @@ def _bind(handle) -> None:
 
 
 def _candidates() -> list[str]:
-    """Possible .so locations, most likely first."""
-    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # server/vercel
+    """Possible native library locations, most likely first."""
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # server/
+    root = os.path.dirname(base)  # project root
+    meipass = [sys._MEIPASS] if getattr(sys, "frozen", False) else []
     return [
+        *[os.path.join(m, n) for m in meipass
+          for n in ("seedfinder_lib.dll", "seedfinder_lib.so")],
         os.path.join(base, "seedfinder_lib.so"),
-        os.path.join(base, "..", "..", "..", "build_server", "seedfinder_lib.so"),
-        os.path.join(base, "..", "..", "..", "build_server", "libseedfinder_lib.so"),
+        os.path.join(root, "build_server", "seedfinder_lib.dll"),
+        os.path.join(root, "build_server", "seedfinder_lib.so"),
+        os.path.join(root, "build_server", "libseedfinder_lib.so"),
     ]
 
 
 def bootstrap_lib() -> None:
     """Best-effort load at import time. Never raises — routes degrade to 503."""
     global lib
-    so_path = next((c for c in _candidates() if os.path.isfile(c)), None)
-    if so_path is None:
-        print("[seedfinder] .so not found", file=sys.stderr)
+    lib_path = next((c for c in _candidates() if os.path.isfile(c)), None)
+    if lib_path is None:
+        print("[seedfinder] shared library not found", file=sys.stderr)
         return
     try:
-        lib = ctypes.CDLL(os.path.abspath(so_path))
+        lib = ctypes.CDLL(os.path.abspath(lib_path))
         _bind(lib)
-        print(f"[seedfinder] .so loaded: {so_path}", file=sys.stderr)
+        print(f"[seedfinder] shared library loaded: {lib_path}", file=sys.stderr)
     except OSError as e:
-        print(f"[seedfinder] Failed to load .so: {e}", file=sys.stderr)
+        print(f"[seedfinder] Failed to load shared library: {e}", file=sys.stderr)
         lib = None
 
 
-def load_so(so_path) -> None:
+def load_lib(lib_path) -> None:
     """Eager load for CLI runs (index.py main). Exits on failure."""
     global lib
-    if not os.path.isfile(so_path):
-        print(f"ERROR: shared library not found at {so_path}", file=sys.stderr)
+    if not os.path.isfile(lib_path):
+        print(f"ERROR: shared library not found at {lib_path}", file=sys.stderr)
         print("Build it first with: cmake .. && make", file=sys.stderr)
         sys.exit(1)
     try:
-        lib = ctypes.CDLL(os.path.abspath(so_path))
+        lib = ctypes.CDLL(os.path.abspath(lib_path))
         _bind(lib)
     except OSError as e:
-        print(f"ERROR: Failed to load .so: {e}", file=sys.stderr)
+        print(f"ERROR: Failed to load shared library: {e}", file=sys.stderr)
         sys.exit(1)
-    print(f".so loaded: {so_path}")
+    print(f"shared library loaded: {lib_path}")

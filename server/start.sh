@@ -57,7 +57,7 @@ echo
 echo "Keep this window open while using SeedFinder."
 echo "The Minecraft mod will connect to http://localhost:7890"
 echo
-# Pick whichever .so exists (order matches the resolve order in linux/index.py)
+# Pick whichever .so exists (order matches the resolve order in app/native.py)
 if [ -f build_server/seedfinder_lib.so ]; then
     SO_PATH=build_server/seedfinder_lib.so
 elif [ -f build_server/libseedfinder_lib.so ]; then
@@ -65,5 +65,5 @@ elif [ -f build_server/libseedfinder_lib.so ]; then
 else
     echo "ERROR: no .so found"; exit 1
 fi
-# Serve the same web pages as the Vercel deployment (server/vercel/index.py)
-exec "$PYTHON" server/vercel/index.py --so-path "$SO_PATH"
+# Serve the same web pages as the Vercel deployment (server/index.py)
+exec "$PYTHON" server/index.py --lib-path "$SO_PATH"

@@ -13,12 +13,12 @@ import shutil
 import subprocess
 import sys
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..\\..\\..\\'))
-SERVER_DIR = os.path.join(ROOT, 'server')
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+SERVER_DIR = os.path.dirname(__file__)
 DLL_PATH = os.path.join(ROOT, 'build_server', 'seedfinder_lib.dll')
 DIST_DIR = os.path.join(SERVER_DIR, 'dist')
 SPEC_DIR = os.path.join(SERVER_DIR, 'build_spec')
-INDEX_FILE = os.path.join(SERVER_DIR, 'bases\\win\\index.py')
+INDEX_FILE = os.path.join(SERVER_DIR, 'index.py')
 
 def main():
     if not os.path.isfile(DLL_PATH):
@@ -44,7 +44,7 @@ def main():
         '--hidden-import', 'flask_cors',
         '--noupx',  # Avoid UPX compression issues with DLLs
         '--console',  # Keep console window visible for logs
-        '--icon=../logo/logo.ico',
+        '--icon=server\\logo\\logo.ico',
         INDEX_FILE,
     ]
 

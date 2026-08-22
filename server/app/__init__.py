@@ -13,8 +13,8 @@ from . import native
 from .api import api_bp
 from .pages import pages_bp
 
-# The app package lives in server/vercel/app, but templates/static sit
-# one level up alongside index.py. Point flask at them explicitly.
+# The app package lives in server/app, but templates/static sit one level
+# up alongside index.py. Point flask at them explicitly.
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -31,4 +31,9 @@ def create_app() -> Flask:
 
     app.register_blueprint(api_bp)
     app.register_blueprint(pages_bp)
+
+    @app.errorhandler(404)
+    def not_found(_):
+        return "404 — página não encontrada", 404
+
     return app
