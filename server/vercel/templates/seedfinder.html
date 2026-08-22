@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}SeedFinder — API Console{% endblock %}
+
+{% block content %}
+<section class="console-head">
+	<p class="breadcrumb"><a href="/">Início</a><span>/</span>SeedFinder</p>
+	<h1 class="page-title">Seed<span class="hero-accent">Finder</span> Console</h1>
+	<p class="page-sub">
+		Informe a seed, a posição e os tipos de estrutura. O scan percorre as regiões
+		ao redor e devolve tudo ordenado por distância.
+	</p>
+	<span id="api-status" class="chip soon"><i></i> Verificando API…</span>
+</section>
+
+<section class="console-grid">
+	<div class="card panel">
+		<h2 class="panel-title">Parâmetros do scan</h2>
+
+		<div class="inputs-grid">
+			<div class="field">
+				<label for="seed">Seed</label>
+				<input id="seed" type="text" value="1" spellcheck="false" />
+			</div>
+			<div class="field">
+				<label for="x">X</label>
+				<input id="x" type="number" value="0" />
+			</div>
+			<div class="field">
+				<label for="z">Z</label>
+				<input id="z" type="number" value="0" />
+			</div>
+			<div class="field">
+				<label for="radius">Radius (chunks)</label>
+				<input id="radius" type="number" value="100" min="1" max="1000" />
+			</div>
+			<div class="field field-wide">
+				<label for="max">Máximo de resultados</label>
+				<input id="max" type="number" value="50" min="1" max="1000" />
+			</div>
+		</div>
+
+		<h3 class="panel-subtitle">Estruturas</h3>
+		<div class="types" id="types">
+			{% for id, name in [
+				(1,  "Desert Pyramid"), (2,  "Jungle Temple"), (3,  "Swamp Hut"),
+				(4,  "Igloo"),          (5,  "Village"),      (6,  "Ocean Ruin"),
+				(7,  "Shipwreck"),      (8,  "Monument"),     (9,  "Mansion"),
+				(10, "Outpost"),        (11, "Ruined Portal"),(12, "Ruined Portal (Nether)"),
+				(13, "Ancient City"),   (14, "Buried Treasure"), (15, "Mineshaft"),
+				(16, "Desert Well"),    (17, "Geode"),        (23, "Trail Ruins"),
+				(24, "Trial Chambers"),
+			] %}
+			<label class="type-slot">
+				<input type="checkbox" value="{{ id }}" />
+				<span>{{ name }}</span>
+			</label>
+			{% endfor %}
+		</div>
+
+		<button id="scan-btn" class="btn btn-primary btn-wide" onclick="scan()">
+			Escanear&nbsp;▸
+		</button>
+	</div>
+
+	<div class="card panel results-panel">
+		<h2 class="panel-title">Resultados</h2>
+		<div id="results" class="results">
+			<p class="results-empty">Preencha os parâmetros e clique em <em>Escanear</em>.</p>
+		</div>
+	</div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+	const $ = (id) => document.getElementById(id);
+
+	// API health on load
+	(async () => {
+		const chip = $("api-status");
+		try {
+			const r = await fetch("/status");
+			const d = await r.json();
+			if (r.ok && d.ok) {
+				chip.className = "chip ok";
+				chip.innerHTML = `<i></i> API online${d.version ? " · " + d.version : ""}`;
+			} else {
+				chip.className = "chip bad";
+				chip.innerHTML = "<i></i> API indisponível";
+			}
+		} catch (_) {
+			chip.className = "chip bad";
+			chip.innerHTML = "<i></i> Falha ao consultar a API";
+		}
+	})();
+
+	async function scan() {
+		const seed = $("seed").value.trim();
+		const x = $("x").value;
+		const z = $("z").value;
+		const radius = $("radius").value;
+		const max = $("max").value;
+		const types = [...document.querySelectorAll("#types input:checked")]
+			.map((c) => c.value)
+			.join(",");
+
+		const url =
+			`/scan?seed=${encodeURIComponent(seed)}&x=${encodeURIComponent(x)}` +
+			`&z=${encodeURIComponent(z)}&radius=${encodeURIComponent(radius)}` +
+			`&max=${encodeURIComponent(max)}` + (types ? `&types=${types}` : "");
+
+		const results = $("results");
+		const btn = $("scan-btn");
+		btn.disabled = true;
+		btn.textContent = "Escaneando…";
+
+		const render = (html) => { results.innerHTML = html; };
+		render(`<div class="results-loading"><span></span><span></span><span></span><p>escaneando regiões…</p></div>`);
+		try {
+			const res = await fetch(url);
+			const data = await res.json();
+			if (res.status === 503 || !data.results) {
+				render(`<p class="results-error">${data.error || "Erro desconhecido"}<br>
+						<span>${data.hint || ""}</span></p>`);
+				return;
+			}
+			if (!data.results.length) {
+				render("<p class='results-empty'>Nenhuma estrutura encontrada nessa área.</p>");
+				return;
+			}
+			const rows = data.results
+				.map((s, i) => `
+					<tr${i === 0 ? ' class="nearest"' : ""}>
+						<td class="rank">#${i + 1}</td>
+						<td class="name">▸ ${s.name}</td>
+						<td class="coord">${s.x}<span class="coord-sep">/</span>${s.z}</td>
+						<td class="dist">${Number(s.distance).toFixed(1)} ch</td>
+					</tr>`)
+				.join("");
+			render(`<table class="result-table">
+				<thead><tr><th>#</th><th>Estrutura</th><th>X / Z</th><th>Distância</th></tr></thead>
+				<tbody>${rows}</tbody></table>
+				<p class="results-meta">${data.results.length} estrutura(s) encontrada(s)</p>`);
+		} catch (err) {
+			render(`<p class="results-error">Falha ao conectar com a API.<br><span>${err}</span></p>`);
+		} finally {
+			btn.disabled = false;
+			btn.textContent = "Escanear ▸";
+		}
+	}
+
+	// Enter on any input triggers the scan
+	document.querySelectorAll("#seed, #x, #z, #radius, #max").forEach((el) => {
+		el.addEventListener("keydown", (e) => { if (e.key === "Enter") scan(); });
+	});
+</script>
+{% endblock %}

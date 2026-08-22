@@ -1,127 +1,71 @@
-<!doctype html>
-<html lang="en">
-	<head>
-		<meta charset="UTF-8" />
-		<meta name="google-site-verification" content="rH8_jqzUfRBHm4Aw7NabTbS15cSjYd0tImZ9v0Uy4dc" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>SeedFinder Home</title>
-		<link rel="stylesheet" href="{{ url_for('static', filename='style/index.css') }}">
-		<link rel="stylesheet" href="{{ url_for('static', filename='style/nav.css') }}">
-	</head>
-	<body>
-		<nav class="nav">
-			<a href="https://github.com/zebedelu/SeedFinder" class="logo-div"> 
-                <img
-                    src="https://github.com/zebedelu/SeedFinder/raw/main/server/logo/logo.ico"
-                    class="logo"
-                />
-                <p>SeedFinder</p>
-            </a>
-            <div>
-                <a class="page-link" href="">Home</a>
-                <a class="page-link unavaiable">SeedCracker (coming soon)</a>
-                <a class="page-link" href="seedfinder">SeedFinder API</a>
-            </div>
-		</nav>
-		<main>
-			<h1>Test SeedFinder</h1>
-			<div class="inputs-grid">
-				<div class="field">
-					<label>Seed</label><br />
-					<input id="seed" type="text" value="1" />
-				</div>
+{% extends "base.html" %}
+{% block title %}SeedFinder — Home{% endblock %}
 
-				<div class="field">
-					<label>X</label><br />
-					<input id="x" type="number" value="0" />
-				</div>
-
-				<div class="field">
-					<label>Z</label><br />
-					<input id="z" type="number" value="0" />
-				</div>
-
-				<div class="field">
-					<label>Radius (chunks)</label><br />
-					<input id="radius" type="number" value="100" />
-				</div>
-
-				<div class="field max-field">
-					<label>Maximum Results</label><br />
-					<input id="max" type="number" value="50" />
-				</div>
+{% block content %}
+<section class="hero">
+	<div class="hero-copy">
+		<p class="hero-kicker">Minecraft Bedrock&nbsp;·&nbsp;structure finder</p>
+		<h1 class="hero-title">Seed<span class="hero-accent">Finder</span><span class="cursor-block">_</span></h1>
+		<p class="hero-sub">
+			Localiza estruturas de qualquer mundo do Minecraft Bedrock pela seed e posição
+			do jogador — sem depender de serviços de terceiros. Roda como API REST.
+		</p>
+		<div class="hero-actions">
+			<a class="btn btn-primary" href="/seedfinder">Abrir SeedFinder</a>
+			<a class="btn btn-ghost" href="https://github.com/zebedelu/SeedFinder" target="_blank" rel="noopener">Ver código</a>
+		</div>
+	</div>
+	<div class="hero-console" aria-hidden="true">
+		<div class="term">
+			<div class="term-bar">
+				<span class="term-dot red"></span><span class="term-dot yellow"></span><span class="term-dot green"></span>
+				<span class="term-name">mineseedfinder.vercel.app</span>
 			</div>
-			<h3>Structures</h3>
-			<div class="types">
-				<label><input type="checkbox" value="1" /> Desert Pyramid</label>
-				<label><input type="checkbox" value="2" /> Jungle Temple</label>
-				<label><input type="checkbox" value="3" /> Swamp Hut</label>
-				<label><input type="checkbox" value="4" /> Igloo</label>
-				<label><input type="checkbox" value="5" /> Village</label>
-				<label><input type="checkbox" value="6" /> Ocean Ruin</label>
-				<label><input type="checkbox" value="7" /> Shipwreck</label>
-				<label><input type="checkbox" value="8" /> Monument</label>
-				<label><input type="checkbox" value="9" /> Mansion</label>
-				<label><input type="checkbox" value="10" /> Outpost</label>
-				<label><input type="checkbox" value="11" /> Ruined Portal</label>
-				<label
-					><input type="checkbox" value="12" /> Ruined Portal (Nether)</label
-				>
-				<label><input type="checkbox" value="13" /> Ancient City</label>
-				<label><input type="checkbox" value="14" /> Buried Treasure</label>
-				<label><input type="checkbox" value="15" /> Mineshaft</label>
-				<label><input type="checkbox" value="16" /> Desert Well</label>
-				<label><input type="checkbox" value="17" /> Geode</label>
-				<label><input type="checkbox" value="23" /> Trail Ruins</label>
-				<label><input type="checkbox" value="24" /> Trial Chambers</label>
+			<div class="term-body">
+				<p><span class="t-prompt">$</span> scan --seed 31415 --radius 100</p>
+				<p class="t-out"><span class="t-ok">▸ village</span> x=712 z=-520 <span class="t-dim">dist 54.4</span></p>
+				<p class="t-out"><span class="t-ok">▸ mansion</span> x=520 z=216 <span class="t-dim">dist 34.5</span></p>
+				<p class="t-out"><span class="t-ok">▸ village</span> x=136 z=1176 <span class="t-dim">dist 73.7</span></p>
+				<p class="t-cursor">▌</p>
 			</div>
-			<button onclick="scan()">Scan</button>
-			<div id="results"></div>
-			<p class="credits left">
-				Credits on Github
-				<a href="https://github.com/zebedelu" target="_blank">@zebedelu</a>.
+		</div>
+	</div>
+</section>
+
+<section class="tools" id="tools">
+	<h2 class="section-title">Ferram<span class="hero-accent">entas</span></h2>
+	<div class="tools-grid">
+		<article class="card slot seedfinder-slot">
+			<header class="card-head">
+				<span class="card-ico green">SF</span>
+				<div>
+					<h3 class="card-name">SeedFinder</h3>
+					<span class="chip ok"><i></i> Online</span>
+				</div>
+			</header>
+			<p class="card-desc">
+				Digite a seed e a posição — a API devolve as estruturas próximas
+				ordenadas por distância: vilas, templos, monumentos, cidades antigas…
 			</p>
-		</main>
-		<script>
-			async function scan() {
-				const seed = document.getElementById("seed").value;
-				const x = document.getElementById("x").value;
-				const z = document.getElementById("z").value;
-				const radius = document.getElementById("radius").value;
-				const max = document.getElementById("max").value;
-				const types = [...document.querySelectorAll(".types input:checked")]
-					.map((x) => x.value)
-					.join(",");
-				let url =
-					window.location.href +
-					`scan?seed=${seed}&x=${x}&z=${z}&radius=${radius}&max=${max}`;
-				if (types) url += `&types=${types}`;
-				const results = document.getElementById("results");
-				results.innerHTML = "Loading...";
-				try {
-					const response = await fetch(url);
-					const data = await response.json();
-					if (!data.results || !data.results.length) {
-						results.innerHTML = "<p>No results found.</p>";
-						return;
-					}
-					let html = "<h3>Results</h3><ul>";
-					for (const item of data.results) {
-						html += `
-                <li>
-                    <b>${item.name}</b>
-                    | X: ${item.x}
-                    | Z: ${item.z}
-                    | Distance: ${item.distance}
-                </li>
-            `;
-					}
-					html += "</ul>";
-					results.innerHTML = html;
-				} catch (ex) {
-					results.innerHTML = `<p>Failed to connect to API.<br>${ex}</p>`;
-				}
-			}
-		</script>
-	</body>
-</html>
+			<p class="card-snippet">GET /scan?seed=…&amp;x=…&amp;z=…&amp;types=5,8,9</p>
+			<a class="btn btn-primary btn-block" href="/seedfinder">Abrir SeedFinder</a>
+		</article>
+
+		<article class="card slot seedcracker-slot">
+			<header class="card-head">
+				<span class="card-ico gold">SC</span>
+				<div>
+					<h3 class="card-name">SeedCracker</h3>
+					<span class="chip soon"><i></i> Não avaliado</span>
+				</div>
+			</header>
+			<p class="card-desc">
+				O caminho inverso: a partir das estruturas que você encontra no mundo,
+				descobrir a seed. Ainda em desenvolvimento.
+			</p>
+			<p class="card-snippet">status: em desenvolvimento</p>
+			<button class="btn btn-block" disabled title="Em desenvolvimento">Em breve</button>
+		</article>
+	</div>
+</section>
+{% endblock %}
