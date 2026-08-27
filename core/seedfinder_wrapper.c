@@ -59,6 +59,8 @@ SEEDFINDER_API char *seedfinder_scan(
     setupGenerator(&g, MC_NEWEST, 0);
     applySeed(&g, DIM_OVERWORLD, seed);
 
+    uint64_t seed32 = seed & 0xFFFFFFFFULL; /* Bedrock world seeds are 32-bit */
+
     int playerChunkX = (int)floor(playerX / 16.0);
     int playerChunkZ = (int)floor(playerZ / 16.0);
 
@@ -83,12 +85,23 @@ SEEDFINDER_API char *seedfinder_scan(
         for (int regX = regionMinX; regX <= regionMaxX; regX++) {
             for (int regZ = regionMinZ; regZ <= regionMaxZ; regZ++) {
                 Pos pos;
-                if (!getBedrockStructurePos(structType, MC_NEWEST, seed, regX, regZ, &pos))
+                if (!getBedrockStructurePos(structType, MC_NEWEST, seed32, regX, regZ, &pos))
                     continue;
 
                 /* Biome viability check */
                 if (!isViableBedrockStructurePos(structType, &g, pos.x, pos.z, 0))
                     continue;
+
+                /* Bedrock checks the biome at the structure's OWN position cell;
+                   the upstream Java-style gate samples an offset door corner and
+                   passes positions sitting on swamp/river/etc. */
+                if (structType == Outpost) {
+                    int cellX = (pos.x >> 4) * 4 + 2;
+                    int cellZ = (pos.z >> 4) * 4 + 2;
+                    int bio = getBiomeAt(&g, 0, cellX, 319 >> 2, cellZ);
+                    if (bio < 0 || !isViableFeatureBiome(MC_NEWEST, Outpost, bio))
+                        continue;
+                }
 
                 int dx = pos.x / 16 - playerChunkX;
                 int dz = pos.z / 16 - playerChunkZ;
