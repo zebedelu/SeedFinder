@@ -68,26 +68,26 @@ def llms():
     base = request.url_root.rstrip("/")
     txt = f"""# SeedFinder
 
-SeedFinder é uma API REST gratuita que localiza estruturas do Minecraft Bedrock a partir da seed do mundo e da posição do jogador: vilas, cidades antigas, monumentos oceânicos, tesouros enterrados, mansões e muito mais. Sem cadastro e sem auth.
+SeedFinder is a free REST API that locates Minecraft Bedrock structures from the world seed and the player position: villages, ancient cities, ocean monuments, buried treasure, mansions and more. No sign-up and no auth.
 
-## Páginas
+## Pages
 
-- [Início]({base}/): landing page com os links para o console e a documentação.
-- [Console SeedFinder]({base}/seedfinder): console interativo para executar um scan de estruturas no navegador.
-- [Documentação da API]({base}/seedfinder/documentation): documentação completa dos endpoints /status e /scan, parâmetros, IDs de estruturas e exemplos de clientes.
+- [Home]({base}/): landing page with links to the console and the documentation.
+- [SeedFinder console]({base}/seedfinder): interactive console to run a structure scan in the browser.
+- [API documentation]({base}/seedfinder/documentation): full documentation of the /status and /scan endpoints, parameters, structure IDs and client examples.
 
 ## API
 
-- `GET {base}/status` — health check da API.
-- `GET {base}/scan?seed=SEED&x=X&z=Z&radius=R&max=M&types=IDS` — busca estruturas ao redor de uma posição. `radius` e `max` são limitados a 1000. `types` é uma lista de IDs separada por vírgulas.
+- `GET {base}/status` - API health check.
+- `GET {base}/scan?seed=SEED&x=X&z=Z&radius=R&max=M&types=IDS` - finds structures around a position. `radius` and `max` are capped at 1000. `types` is a comma-separated list of IDs.
 
-### IDs de estruturas
+### Structure IDs
 
 1=Desert Pyramid, 2=Jungle Temple, 3=Swamp Hut, 4=Igloo, 5=Village, 7=Shipwreck, 8=Ocean Monument, 9=Woodland Mansion, 11/12=Ruined Portal, 13=Ancient City, 14=Buried Treasure, 15=Mineshaft, 23=Trail Ruins, 24=Trial Chambers
 
-## Outros
+## Other
 
-- [Repositório no GitHub](https://github.com/zebedelu/SeedFinder): código-fonte, builds e instruções de uso.
+- [GitHub repository](https://github.com/zebedelu/SeedFinder): source code, builds and usage instructions.
 """
     return Response(txt, mimetype="text/plain")
 

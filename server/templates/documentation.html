@@ -1,42 +1,42 @@
 {% extends "base.html" %}
-{% block title %}SeedFinder — Documentação{% endblock %}
-{% block description %}Documentação da API SeedFinder: endpoints GET /status e /scan, parâmetros seed, x, z, radius, max e types, IDs de estruturas e exemplos em Python, Lua e Node.js.{% endblock %}
-{% block keywords %}seedfinder api, api minecraft, documentação, rest api, estruturas bedrock{% endblock %}
+{% block title %}SeedFinder - Documentation{% endblock %}
+{% block description %}SeedFinder API documentation: GET /status and /scan endpoints, seed, x, z, radius, max and types parameters, structure IDs and code examples in Python, Lua and Node.js.{% endblock %}
+{% block keywords %}seedfinder api, minecraft api, documentation, rest api, bedrock structures{% endblock %}
 
 {% block content %}
 <section class="console-head">
-	<p class="breadcrumb"><a href="/">Início</a><span>/</span><a href="/seedfinder">SeedFinder</a><span>/</span>Documentação</p>
+	<p class="breadcrumb"><a href="/">Home</a><span>/</span><a href="/seedfinder">SeedFinder</a><span>/</span>Documentation</p>
 	<h1 class="page-title">API <span class="hero-accent">Documentation</span></h1>
 	<p class="page-sub">
-		SeedFinder é uma API REST que localiza estruturas do Minecraft Bedrock a partir
-		de uma seed e posição do jogador. Tudo em JSON.
+		SeedFinder is a REST API that locates Minecraft Bedrock structures from a
+		seed and player position. Everything returns JSON.
 	</p>
 </section>
 
-<nav class="docs-toc" aria-label="Índice">
+<nav class="docs-toc" aria-label="Contents">
 	<details>
-		<summary>Índice</summary>
+		<summary>Contents</summary>
 		<ol>
-			<li><a href="#overview">Visão geral</a></li>
+			<li><a href="#overview">Overview</a></li>
 			<li><a href="#base-url">Base URL</a></li>
 			<li><a href="#status">GET /status</a></li>
 			<li><a href="#scan">GET /scan</a></li>
-			<li><a href="#params">Parâmetros da query</a></li>
-			<li><a href="#structure-ids">IDs de estruturas</a></li>
-			<li><a href="#live-example">Exemplo ao vivo</a></li>
-			<li><a href="#clients">Exemplos de clientes</a></li>
+			<li><a href="#params">Query parameters</a></li>
+			<li><a href="#structure-ids">Structure IDs</a></li>
+			<li><a href="#live-example">Live example</a></li>
+			<li><a href="#clients">Client examples</a></li>
 		</ol>
 	</details>
 </nav>
 
 <article class="docs">
 	<section id="overview">
-		<h2>Visão geral</h2>
+		<h2>Overview</h2>
 		<p>
-			Todos os endpoints abaixo são alcançáveis em
-			<code class="inline">https://mineseedfinder.vercel.app</code> e retornam JSON.
-			A busca percorre as regiões de geração ao redor do jogador, valida os biomas
-			via cubiomes e ordena os resultados por distância.
+			All endpoints below are reachable at
+			<code class="inline">https://mineseedfinder.vercel.app</code> and return JSON.
+			The search walks the generation regions around the player, checks biomes
+			through cubiomes and sorts the results by distance.
 		</p>
 	</section>
 
@@ -50,8 +50,8 @@
 
 	<section id="status">
 		<h2>Endpoint <code class="inline">GET /status</code></h2>
-		<p>Health check. Indica se a biblioteca nativa foi carregada e a versão.</p>
-		<p class="doc-label">Resposta 200:</p>
+		<p>Health check. Reports whether the native library loaded and its version.</p>
+		<p class="doc-label">200 response:</p>
 		<div class="code-block">
 			<button class="copy-btn" data-target="status-ok">copy</button>
 			<pre><code id="status-ok">{
@@ -59,7 +59,7 @@
   "version": "..."
 }</code></pre>
 		</div>
-		<p class="doc-label">Resposta 500:</p>
+		<p class="doc-label">500 response:</p>
 		<div class="code-block">
 			<button class="copy-btn" data-target="status-err">copy</button>
 			<pre><code id="status-err">{
@@ -71,60 +71,60 @@
 
 	<section id="scan">
 		<h2>Endpoint <code class="inline">GET /scan</code></h2>
-		<p>Efetua o scan de estruturas perto da posição informada.</p>
+		<p>Scans for structures near the given position.</p>
 
-		<h3>Parâmetros da query</h3>
+		<h3>Query parameters</h3>
 		<table class="param-table">
 			<thead>
-				<tr><th>Parâmetro</th><th>Tipo</th><th>Default</th><th>Descrição</th></tr>
+				<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
 			</thead>
 			<tbody>
 				<tr>
 					<td><code class="inline">seed</code></td>
 					<td>int (uint64)</td>
 					<td><code class="inline">0</code></td>
-					<td>A seed do mundo.</td>
+					<td>The world seed.</td>
 				</tr>
 				<tr>
 					<td><code class="inline">x</code></td>
 					<td>float</td>
 					<td><code class="inline">0</code></td>
-					<td>Coordenada X do jogador (em blocos).</td>
+					<td>Player X coordinate, in blocks.</td>
 				</tr>
 				<tr>
 					<td><code class="inline">z</code></td>
 					<td>float</td>
 					<td><code class="inline">0</code></td>
-					<td>Coordenada Z do jogador (em blocos).</td>
+					<td>Player Z coordinate, in blocks.</td>
 				</tr>
 				<tr>
 					<td><code class="inline">radius</code></td>
 					<td>int</td>
 					<td><code class="inline">100</code></td>
-					<td>Raio de busca em chunks. Limitado a <code class="inline">1000</code>.</td>
+					<td>Search radius in chunks. Capped at <code class="inline">1000</code>.</td>
 				</tr>
 				<tr>
 					<td><code class="inline">max</code></td>
 					<td>int</td>
 					<td><code class="inline">20</code></td>
-					<td>Máximo de resultados. Limitado a <code class="inline">1000</code>.</td>
+					<td>Maximum results. Capped at <code class="inline">1000</code>.</td>
 				</tr>
 				<tr>
 					<td><code class="inline">types</code></td>
 					<td>string</td>
 					<td><code class="inline">5</code></td>
-					<td>IDs de estruturas separados por vírgula.</td>
+					<td>Comma-separated structure IDs.</td>
 				</tr>
 			</tbody>
 		</table>
 
 		<div class="note">
-			Todo parâmetro ausente ou inválido é substituído pelo default. A resposta
-			inclui um array <code class="inline">missing_or_invalid</code> listando os
-			parâmetros trocados pelo servidor.
+			Any missing or invalid parameter is replaced by its default. The response
+			includes a <code class="inline">missing_or_invalid</code> array listing the
+			parameters the server swapped out.
 		</div>
 
-		<p class="doc-label">Exemplo de resposta 200:</p>
+		<p class="doc-label">Example 200 response:</p>
 		<div class="code-block">
 			<button class="copy-btn" data-target="scan-ok">copy</button>
 			<pre><code id="scan-ok">{
@@ -141,7 +141,7 @@
 }</code></pre>
 		</div>
 
-		<p class="doc-label">Erro 400 (parâmetro inválido):</p>
+		<p class="doc-label">400 error (invalid parameter):</p>
 		<div class="code-block">
 			<button class="copy-btn" data-target="scan-400">copy</button>
 			<pre><code id="scan-400">{
@@ -150,7 +150,7 @@
 }</code></pre>
 		</div>
 
-		<p class="doc-label">Erro 503 (biblioteca nativa não carregada):</p>
+		<p class="doc-label">503 error (native library not loaded):</p>
 		<div class="code-block">
 			<button class="copy-btn" data-target="scan-503">copy</button>
 			<pre><code id="scan-503">{
@@ -163,12 +163,12 @@
 	</section>
 
 	<section id="structure-ids">
-		<h2>IDs de estruturas</h2>
+		<h2>Structure IDs</h2>
 		<p>
-			O parâmetro <code class="inline">types</code> aceita IDs separados por
-			vírgula da tabela abaixo. Ex.: <code class="inline">Outpost</code> →
-			<code class="inline">10</code>, <code class="inline">Village</code> →
-			<code class="inline">5</code>.
+			The <code class="inline">types</code> parameter accepts comma-separated
+			IDs from the table below. For example, <code class="inline">Outpost</code>
+			is <code class="inline">10</code> and <code class="inline">Village</code>
+			is <code class="inline">5</code>.
 		</p>
 		<table class="param-table">
 			<thead>
@@ -197,17 +197,17 @@
 	</section>
 
 	<section id="live-example">
-		<h2>Exemplo ao vivo</h2>
+		<h2>Live example</h2>
 		<p>
-			Clique para abrir a chamada abaixo — busca por vilas, monumentos e mansões
-			em até 100 chunks do spawn na seed <code class="inline">31415</code>:
+			Click to open the request below - it looks for villages, monuments and
+			mansions within 100 chunks of spawn on seed <code class="inline">31415</code>:
 		</p>
 		<div class="code-block">
-			<a class="btn btn-ghost btn-copy-link" href="/scan?seed=31415&x=0&z=0&radius=100&max=50&types=5,8,9" target="_blank" rel="noopener">Abrir chamada ▸</a>
+			<a class="btn btn-ghost btn-copy-link" href="/scan?seed=31415&x=0&z=0&radius=100&max=50&types=5,8,9" target="_blank" rel="noopener">Open request ▸</a>
 			<button class="copy-btn" data-target="ex-url">copy</button>
 			<pre><code id="ex-url">https://mineseedfinder.vercel.app/scan?seed=31415&x=0&z=0&radius=100&max=50&types=5,8,9</code></pre>
 		</div>
-		<p class="doc-label">Resposta de exemplo:</p>
+		<p class="doc-label">Example response:</p>
 		<div class="code-block">
 			<button class="copy-btn" data-target="ex-resp">copy</button>
 			<pre><code id="ex-resp">{"results":[{"distance":34.5,"name":"mansion","x":520,"z":216},{"distance":54.4,"name":"village","x":712,"z":-520},{"distance":56.5,"name":"village","x":-360,"z":-840},{"distance":73.7,"name":"village","x":168,"z":1176},{"distance":84.4,"name":"village","x":136,"z":-1352},{"distance":91.4,"name":"village","x":-1448,"z":-264},{"distance":92.8,"name":"village","x":-296,"z":-1464}]}</code></pre>
@@ -215,11 +215,11 @@
 	</section>
 
 	<section id="clients">
-		<h2>Exemplos de clientes</h2>
+		<h2>Client examples</h2>
 		<p>
-			Escolha a linguagem abaixo para ver como chamar <code class="inline">/scan</code>
-			com <code class="inline">requests</code> (Python), <code class="inline">network.get</code>
-			(Lua, ex.: dentro do Flarial Client) ou o módulo nativo <code class="inline">https</code> (Node.js).
+			Pick a language below to see how to call <code class="inline">/scan</code>
+			with <code class="inline">requests</code> (Python), <code class="inline">network.get</code>
+			(Lua, e.g. inside Flarial Client) or the native <code class="inline">https</code> module (Node.js).
 		</p>
 
 		<div class="lang-tabs">
@@ -255,7 +255,7 @@ if __name__ == "__main__":
 
 		<div class="code-block lang-panel" data-lang="lua" hidden>
 			<button class="copy-btn" data-target="code-lua">copy</button>
-			<pre><code id="code-lua">-- Drop-in para módulos do Flarial Client. `network` é um global do Flarial.
+			<pre><code id="code-lua">-- Drop-in for Flarial Client modules. `network` is a Flarial global.
 local BASE = "https://mineseedfinder.vercel.app"
 
 local function scan(seed, x, z, radius, maxResults, types)
@@ -263,23 +263,23 @@ local function scan(seed, x, z, radius, maxResults, types)
         "%s/scan?seed=%d&x=%d&z=%d&radius=%d&max=%d&types=%s",
         BASE, seed, x, z, radius, maxResults, types
     )
-    -- seedfinder usa types= para os IDs das estruturas, ex.: "5,8,9"
+    -- seedfinder takes the structure IDs in types, e.g. "5,8,9"
     local resp = network.get(url)
     if not resp or resp.code ~= 200 then
         print("[seedfinder] HTTP error: " .. tostring(resp and resp.code))
         return nil
     end
-    return resp.body  -- string JSON; adapte com sua lib JSON se necessário
+    return resp.body  -- JSON string; parse it with your JSON lib if needed
 end
 
--- Exemplo: vilas, monumentos e mansões ao redor do spawn na seed 31415
+-- Example: villages, monuments and mansions around spawn on seed 31415
 local body = scan(31415, 0, 0, 100, 50, "5,8,9")
 print(body or "no response")</code></pre>
 		</div>
 
 		<div class="code-block lang-panel" data-lang="nodejs" hidden>
 			<button class="copy-btn" data-target="code-node">copy</button>
-			<pre><code id="code-node">// Sem dependências — usa o fetch nativo do Node 18+.
+			<pre><code id="code-node">// No dependencies - uses the native fetch available in Node 18+.
 const BASE = "https://mineseedfinder.vercel.app";
 
 async function scan(seed, x = 0, z = 0, radius = 100, max = 20, types = "5") {
@@ -289,7 +289,7 @@ async function scan(seed, x = 0, z = 0, radius = 100, max = 20, types = "5") {
     url.searchParams.set("z", String(z));
     url.searchParams.set("radius", String(radius));
     url.searchParams.set("max", String(max));
-    url.searchParams.set("types", types);  // IDs separados por vírgula, ex.: "5,8,9"
+    url.searchParams.set("types", types);  // comma-separated IDs, e.g. "5,8,9"
 
     const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);

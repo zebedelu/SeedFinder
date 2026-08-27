@@ -1,20 +1,20 @@
 {% extends "base.html" %}
-{% block title %}SeedFinder — Home{% endblock %}
-{% block description %}Encontre estruturas do Minecraft Bedrock — vilas, cidades antigas, monumentos e templos — a partir da seed e posição do jogador, com a API gratuita do SeedFinder.{% endblock %}
-{% block keywords %}minecraft, bedrock, seedfinder, encontrar estruturas, vilas, cidades antigas, monumentos, api{% endblock %}
+{% block title %}SeedFinder - Home{% endblock %}
+{% block description %}Find Minecraft Bedrock structures such as villages, ancient cities, monuments and temples from the seed and player position, using the free SeedFinder API.{% endblock %}
+{% block keywords %}minecraft, bedrock, seedfinder, find structures, villages, ancient cities, monuments, api{% endblock %}
 
 {% block content %}
 <section class="hero">
 	<div class="hero-copy">
-		<p class="hero-kicker">Minecraft Bedrock&nbsp;·&nbsp;structure finder</p>
+		<p class="hero-kicker">Minecraft Bedrock&nbsp;-&nbsp;structure finder</p>
 		<h1 class="hero-title">Seed<span class="hero-accent">Finder</span><span class="cursor-block">_</span></h1>
 		<p class="hero-sub">
-			Localiza estruturas de qualquer mundo do Minecraft Bedrock pela seed e posição
-			do jogador — sem depender de serviços de terceiros. Roda como API REST.
+			Locates structures in any Minecraft Bedrock world from the seed and player
+			position - no third-party services needed. Runs as a REST API.
 		</p>
 		<div class="hero-actions">
-			<a class="btn btn-primary" href="/seedfinder">Abrir SeedFinder</a>
-			<a class="btn btn-ghost" href="https://github.com/zebedelu/SeedFinder" target="_blank" rel="noopener">Ver código</a>
+			<a class="btn btn-primary" href="/seedfinder">Open SeedFinder</a>
+			<a class="btn btn-ghost" href="https://github.com/zebedelu/SeedFinder" target="_blank" rel="noopener">View code</a>
 		</div>
 	</div>
 	<div class="hero-console" aria-hidden="true">
@@ -35,7 +35,7 @@
 </section>
 
 <section class="tools" id="tools">
-	<h2 class="section-title">Ferram<span class="hero-accent">entas</span></h2>
+	<h2 class="section-title">Tool<span class="hero-accent">s</span></h2>
 	<div class="tools-grid">
 		<article class="card slot seedfinder-slot">
 			<header class="card-head">
@@ -46,11 +46,11 @@
 				</div>
 			</header>
 			<p class="card-desc">
-				Digite a seed e a posição — a API devolve as estruturas próximas
-				ordenadas por distância: vilas, templos, monumentos, cidades antigas…
+				Enter the seed and position - the API returns nearby structures sorted by
+				distance: villages, temples, monuments, ancient cities...
 			</p>
-			<p class="card-snippet">GET /scan?seed=…&amp;x=…&amp;z=…&amp;types=5,8,9</p>
-			<a class="btn btn-primary btn-block" href="/seedfinder">Abrir SeedFinder</a>
+			<p class="card-snippet">GET /scan?seed=...&amp;x=...&amp;z=...&amp;types=5,8,9</p>
+			<a class="btn btn-primary btn-block" href="/seedfinder">Open SeedFinder</a>
 		</article>
 
 		<article class="card slot seedcracker-slot">
@@ -58,15 +58,15 @@
 				<span class="card-ico gold">SC</span>
 				<div>
 					<h3 class="card-name">SeedCracker</h3>
-					<span class="chip soon"><i></i> Não avaliado</span>
+					<span class="chip soon"><i></i> Not yet available</span>
 				</div>
 			</header>
 			<p class="card-desc">
-				O caminho inverso: a partir das estruturas que você encontra no mundo,
-				descobrir a seed. Ainda em desenvolvimento.
+				The reverse path: from the structures you find in the world, work out
+				the seed. Still in development.
 			</p>
-			<p class="card-snippet">status: em desenvolvimento</p>
-			<button class="btn btn-block" disabled title="Em desenvolvimento">Em breve</button>
+			<p class="card-snippet">status: in development</p>
+			<button class="btn btn-block" disabled title="In development">Coming soon</button>
 		</article>
 	</div>
 </section>

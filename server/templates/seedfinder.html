@@ -1,22 +1,22 @@
 {% extends "base.html" %}
-{% block title %}SeedFinder — API Console{% endblock %}
-{% block description %}Console interativo do SeedFinder: informe a seed, a posição e os tipos de estrutura e veja o que existe por perto, ordenado por distância. API gratuita, sem cadastro.{% endblock %}
-{% block keywords %}seedfinder, console, minecraft, estruturas, scan, api, encontrar vilas{% endblock %}
+{% block title %}SeedFinder - API Console{% endblock %}
+{% block description %}Interactive SeedFinder console: enter the seed, position and structure types and see what is nearby, sorted by distance. Free API, no sign-up.{% endblock %}
+{% block keywords %}seedfinder, console, minecraft, structures, scan, api, find villages{% endblock %}
 
 {% block content %}
 <section class="console-head">
-	<p class="breadcrumb"><a href="/">Início</a><span>/</span>SeedFinder</p>
+	<p class="breadcrumb"><a href="/">Home</a><span>/</span>SeedFinder</p>
 	<h1 class="page-title">Seed<span class="hero-accent">Finder</span> Console</h1>
 	<p class="page-sub">
-		Informe a seed, a posição e os tipos de estrutura. O scan percorre as regiões
-		ao redor e devolve tudo ordenado por distância.
+		Enter the seed, position and structure types. The scan walks the regions
+		around the player and returns everything sorted by distance.
 	</p>
-	<span id="api-status" class="chip soon"><i></i> Verificando API…</span>
+	<span id="api-status" class="chip soon"><i></i> Checking API...</span>
 </section>
 
 <section class="console-grid">
 	<div class="card panel">
-		<h2 class="panel-title">Parâmetros do scan</h2>
+		<h2 class="panel-title">Scan parameters</h2>
 
 		<div class="inputs-grid">
 			<div class="field">
@@ -36,12 +36,12 @@
 				<input id="radius" type="number" value="100" min="1" max="1000" />
 			</div>
 			<div class="field field-wide">
-				<label for="max">Máximo de resultados</label>
+				<label for="max">Maximum results</label>
 				<input id="max" type="number" value="50" min="1" max="1000" />
 			</div>
 		</div>
 
-		<h3 class="panel-subtitle">Estruturas</h3>
+		<h3 class="panel-subtitle">Structures</h3>
 		<div class="types" id="types">
 			{% for id, name in [
 				(1,  "Desert Pyramid"), (2,  "Jungle Temple"), (3,  "Swamp Hut"),
@@ -60,14 +60,14 @@
 		</div>
 
 		<button id="scan-btn" class="btn btn-primary btn-wide" onclick="scan()">
-			Escanear&nbsp;▸
+			Scan&nbsp;▸
 		</button>
 	</div>
 
 	<div class="card panel results-panel">
-		<h2 class="panel-title">Resultados</h2>
+		<h2 class="panel-title">Results</h2>
 		<div id="results" class="results">
-			<p class="results-empty">Preencha os parâmetros e clique em <em>Escanear</em>.</p>
+			<p class="results-empty">Fill in the parameters and click <em>Scan</em>.</p>
 		</div>
 	</div>
 </section>
@@ -85,14 +85,14 @@
 			const d = await r.json();
 			if (r.ok && d.status === "ok") {
 				chip.className = "chip ok";
-				chip.innerHTML = `<i></i> API online${d.version ? " · " + d.version : ""}`;
+				chip.innerHTML = `<i></i> API online${d.version ? " - " + d.version : ""}`;
 			} else {
 				chip.className = "chip bad";
-				chip.innerHTML = "<i></i> API indisponível";
+				chip.innerHTML = "<i></i> API unavailable";
 			}
 		} catch (_) {
 			chip.className = "chip bad";
-			chip.innerHTML = "<i></i> Falha ao consultar a API";
+			chip.innerHTML = "<i></i> Failed to reach the API";
 		}
 	})();
 
@@ -114,20 +114,20 @@
 		const results = $("results");
 		const btn = $("scan-btn");
 		btn.disabled = true;
-		btn.textContent = "Escaneando…";
+		btn.textContent = "Scanning...";
 
 		const render = (html) => { results.innerHTML = html; };
-		render(`<div class="results-loading"><span></span><span></span><span></span><p>escaneando regiões…</p></div>`);
+		render(`<div class="results-loading"><span></span><span></span><span></span><p>scanning regions...</p></div>`);
 		try {
 			const res = await fetch(url);
 			const data = await res.json();
 			if (res.status === 503 || !data.results) {
-				render(`<p class="results-error">${data.error || "Erro desconhecido"}<br>
+				render(`<p class="results-error">${data.error || "Unknown error"}<br>
 						<span>${data.hint || ""}</span></p>`);
 				return;
 			}
 			if (!data.results.length) {
-				render("<p class='results-empty'>Nenhuma estrutura encontrada nessa área.</p>");
+				render("<p class='results-empty'>No structures found in this area.</p>");
 				return;
 			}
 			const rows = data.results
@@ -140,14 +140,14 @@
 					</tr>`)
 				.join("");
 			render(`<table class="result-table">
-				<thead><tr><th>#</th><th>Estrutura</th><th>X / Z</th><th>Distância</th></tr></thead>
+				<thead><tr><th>#</th><th>Structure</th><th>X / Z</th><th>Distance</th></tr></thead>
 				<tbody>${rows}</tbody></table>
-				<p class="results-meta">${data.results.length} estrutura(s) encontrada(s)</p>`);
+				<p class="results-meta">${data.results.length} structure(s) found</p>`);
 		} catch (err) {
-			render(`<p class="results-error">Falha ao conectar com a API.<br><span>${err}</span></p>`);
+			render(`<p class="results-error">Failed to connect to the API.<br><span>${err}</span></p>`);
 		} finally {
 			btn.disabled = false;
-			btn.textContent = "Escanear ▸";
+			btn.textContent = "Scan ▸";
 		}
 	}
 

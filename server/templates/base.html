@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
 	<meta charset="UTF-8" />
 	<meta name="google-site-verification" content="rH8_jqzUfRBHm4Aw7NabTbS15cSjYd0tImZ9v0Uy4dc" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>{% block title %}SeedFinder{% endblock %}</title>
-	<meta name="description" content="{% block description %}Localiza estruturas do Minecraft Bedrock pela seed e posição do jogador — vilas, cidades antigas, monumentos e templos — via API REST gratuita.{% endblock %}" />
-	<meta name="keywords" content="{% block keywords %}minecraft, bedrock, seed, seedfinder, estruturas, vilas, village finder, ancient city, api{% endblock %}" />
+	<meta name="description" content="{% block description %}Finds Minecraft Bedrock structures from the world seed and player position, such as villages, ancient cities, monuments and temples, through a free REST API.{% endblock %}" />
+	<meta name="keywords" content="{% block keywords %}minecraft, bedrock, seed, seedfinder, structures, villages, village finder, ancient city, api{% endblock %}" />
 	<link rel="icon" href="/favicon.ico" />
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -29,13 +29,13 @@
 			/>
 			<span class="nav-title">SeedFinder</span>
 		</a>
-		<button class="nav-toggle" aria-label="Abrir menu" aria-expanded="false">
+		<button class="nav-toggle" aria-label="Open menu" aria-expanded="false">
 			<span></span><span></span><span></span>
 		</button>
 		<div class="nav-links" id="nav-links">
-			<a class="nav-link {% if active == 'home' %}active{% endif %}" href="/">Início</a>
+			<a class="nav-link {% if active == 'home' %}active{% endif %}" href="/">Home</a>
 			<a class="nav-link {% if active == 'seedfinder' %}active{% endif %}" href="/seedfinder">SeedFinder</a>
-			<a class="nav-link {% if active == 'docs' %}active{% endif %}" href="/seedfinder/documentation">Documentação</a>
+			<a class="nav-link {% if active == 'docs' %}active{% endif %}" href="/seedfinder/documentation">Documentation</a>
 			<a class="nav-link nav-github" href="https://github.com/zebedelu/SeedFinder" target="_blank" rel="noopener">GitHub</a>
 		</div>
 	</nav>
@@ -46,7 +46,7 @@
 
 	<footer class="footer">
 		<span>SeedFinder Project</span>
-		<span>créditos no GitHub
+		<span>credits on GitHub
 			<a href="https://github.com/zebedelu" target="_blank" rel="noopener">@zebedelu</a>
 		</span>
 	</footer>

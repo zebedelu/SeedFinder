@@ -34,6 +34,6 @@ def create_app() -> Flask:
 
     @app.errorhandler(404)
     def not_found(_):
-        return "404 — página não encontrada", 404
+        return "404 - page not found", 404
 
     return app
