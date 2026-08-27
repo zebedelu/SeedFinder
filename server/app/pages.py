@@ -83,7 +83,7 @@ SeedFinder is a free REST API that locates Minecraft Bedrock structures from the
 
 ### Structure IDs
 
-1=Desert Pyramid, 2=Jungle Temple, 3=Swamp Hut, 4=Igloo, 5=Village, 7=Shipwreck, 8=Ocean Monument, 9=Woodland Mansion, 11/12=Ruined Portal, 13=Ancient City, 14=Buried Treasure, 15=Mineshaft, 23=Trail Ruins, 24=Trial Chambers
+1=Desert Pyramid, 2=Jungle Temple, 3=Swamp Hut, 4=Igloo, 5=Village, 6=Ocean Ruin, 7=Shipwreck, 8=Ocean Monument, 9=Woodland Mansion, 10=Pillager Outpost, 11/12=Ruined Portal, 13=Ancient City, 14=Buried Treasure, 15=Mineshaft, 23=Trail Ruins, 24=Trial Chambers
 
 ## Other
 

@@ -55,8 +55,6 @@ local STRUCTURE_TYPES = {
 	Ancient_City = 13,
 	Treasure = 14,
 	Mineshaft = 15,
-	Desert_Well = 16,
-	Geode = 17,
 	Trail_Ruins = 23,
 	Trial_Chambers = 24,
 }
@@ -77,8 +75,6 @@ local STRUCTURE_ICONS = {
 	ancient_city = "[A]",
 	buried_treasure = "[B]",
 	mineshaft = "[MS]",
-	desert_well = "[DW]",
-	amethyst_geode = "[G]",
 	trail_ruins = "[T]",
 	trial_chambers = "[TC]",
 	unknown = "[?]",
@@ -100,8 +96,6 @@ local STRUCTURE_DISPLAY_NAMES = {
 	ancient_city = "Ancient City",
 	buried_treasure = "Buried Treasure",
 	mineshaft = "Mineshaft",
-	desert_well = "Desert Well",
-	amethyst_geode = "Amethyst Geode",
 	trail_ruins = "Trail Ruins",
 	trial_chambers = "Trial Chambers",
 	unknown = "Unknown Structure",
@@ -229,7 +223,6 @@ local toggleAncientCity = settings.addToggle("Ancient City", "Search for ancient
 local toggleTrailRuins = settings.addToggle("Trail Ruins", "Search for trail ruins", true)
 local toggleRuinedPortal = settings.addToggle("Ruined Portal", "Search for ruined portals", true)
 local toggleBuriedTreasure = settings.addToggle("Buried Treasure", "Search for buried treasure", true)
-local toggleGeode = settings.addToggle("Amethyst Geode", "Search for amethyst geodes", true)
 
 -- Toggle -> structure type ID mapping
 local TOGGLE_TYPE_MAP = {
@@ -246,7 +239,6 @@ local TOGGLE_TYPE_MAP = {
 	{toggle = toggleTrailRuins, id = STRUCTURE_TYPES.Trail_Ruins},
 	{toggle = toggleRuinedPortal, id = STRUCTURE_TYPES.Ruined_Portal},
 	{toggle = toggleBuriedTreasure, id = STRUCTURE_TYPES.Treasure},
-	{toggle = toggleGeode, id = STRUCTURE_TYPES.Geode},
 }
 
 -- ============================================================================

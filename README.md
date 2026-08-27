@@ -203,17 +203,17 @@ Confirmed by calling `/scan` for every ID against a real seed at a large radius:
 | 1 | Desert Pyramid | ✅ | 13 | Ancient City | ✅ |
 | 2 | Jungle Temple | ✅ | 14 | Buried Treasure | ✅ |
 | 3 | Swamp Hut | ✅ | 15 | Mineshaft | ✅ |
-| 4 | Igloo | ✅ | 16 | Desert Well | ⚠️ not supported |
-| 5 | Village | ✅ | 17 | Amethyst Geode | ⚠️ not supported |
-| 6 | Ocean Ruin | ⚠️ not supported | 23 | Trail Ruins | ✅ |
+| 4 | Igloo | ✅ | 16 | Desert Well | ❌ not supported |
+| 5 | Village | ✅ | 17 | Amethyst Geode | ❌ not supported |
+| 6 | Ocean Ruin | ✅ | 23 | Trail Ruins | ✅ |
 | 7 | Shipwreck | ✅ | 24 | Trial Chambers | ✅ |
 | 8 | Ocean Monument | ✅ | | | |
 | 9 | Woodland Mansion | ✅ | | | |
-| 10 | Pillager Outpost | ⚠️ not supported | | | |
+| 10 | Pillager Outpost | ✅ | | | |
 | 11 | Ruined Portal | ✅ | | | |
 | 12 | Ruined Portal (Nether) | ✅ | | | |
 
-15 of the 19 listed IDs are supported. IDs `6` (Ocean Ruin), `10` (Pillager Outpost), `16` (Desert Well), and `17` (Amethyst Geode) aren't available yet — see [Roadmap](#roadmap).
+17 of the 19 listed IDs are supported. Desert Well (`16`) and Amethyst Geode (`17`) are **not supported**: those are per-chunk placement features, not region-based structures, and the engine has no Bedrock prediction for them — see [Roadmap](#roadmap).
 
 Bastion Remnant, Nether Fortress, and End City aren't exposed under any ID yet, though their structure configs already exist in the engine — see [Roadmap](#roadmap).
 
@@ -281,7 +281,7 @@ And the honest tradeoff: this is a Bedrock-specific, Flarial-specific project wi
 
 - **Direct Lua↔C bridge** (`core/SeedFinderBridge.cpp`) — compile the engine straight into the Flarial Client DLL and expose `seedfinder_bridge.scanStructures(...)` to Lua, removing the HTTP hop for the in-game path.
 - **SeedCracker** — listed as "coming soon" in the hosted API's navigation. Cracking a seed from observed structures, rather than scanning from a known one.
-- **Ocean Ruin, Pillager Outpost, Amethyst Geode, and Desert Well support** — IDs `6`, `10`, `17`, and `16` are reserved but not available yet.
+- **Amethyst Geode and Desert Well support** — IDs `17` and `16` are per-chunk placement features (not region structures) and are not available. Geode prediction would additionally require simulating cave air volume, which the engine doesn't model.
 - **Nether/End structures** — Bastion, Fortress, and End City configs already exist internally but aren't wired into the public `types` list yet.
 
 ## Contributing
