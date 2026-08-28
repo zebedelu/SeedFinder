@@ -103,7 +103,7 @@ def llms():
 - POST body (canonical list form): `[{{"tolerance": 0, "max_seconds": 120}}, {{"type": 5, "x": -280, "z": 152}}, ...]`; a JSON object `{{"structures": [...]}}` is also accepted, and GET uses `?structures=5,-280,152;8,696,360`.
 - Options: `tolerance` (0-8 chunks, default 6; lower = stronger match), `units` (`blocks` default or `chunks`), `start`/`end` (seed range, default full 32-bit space), `max` (result cap, default 500, max 2000), `max_seconds` (time budget, default 30, 1-120; partial results are returned when it expires).
 - Response is always a JSON list: a header item `{{"status": "ok"|"partial"|"error"|"unavailable", "message", "structures", "tolerance", "units", "checked", "elapsed_ms", "timed_out"}}` followed by `{{"seed": 8675309, "score": 0, "matches": [[x, z], ...]}}` per probable seed.
-- Disabled on the hosted (Vercel) deployment: computing the full sweep is too expensive to run for free, so the route answers with an `"unavailable"` list and a GitHub download link. Run the local server (`server\\start.bat` / `server/start.sh`) to use it.
+- Disabled on the hosted deployment: computing the full sweep is too expensive to run for free, so the route answers with an `"unavailable"` list and a GitHub download link. Run the local server (`server\\start.bat` / `server/start.sh`) to use it.
 
 ## Structure IDs
 

@@ -174,7 +174,7 @@ curl -X POST http://127.0.0.1:7890/seedcracker \
 
 The response is always a JSON list: a header item with `status` (`ok`, `partial` when the time budget ran out, `error`, or `unavailable`), then one item per probable seed with `seed`, `score` (sum of squared chunk deviations across structures — lower is better) and the matched structure chunk coordinates.
 
-SeedCracker runs on the **local API only** (`http://127.0.0.1:7890`, started with `server\start.bat` or `server/start.sh`). The hosted (Vercel) instance disables the route because the computation is too expensive to keep running for free; it answers with an `"unavailable"` list and a download link. Payload options: `tolerance` (0–8 chunks, default 6), `units` (`blocks` or `chunks`), `start`/`end` (seed range), `max` (default 500, cap 2000), `max_seconds` (default 30, 1–120). Full docs: [SeedCrackerX documentation](https://mineseedfinder.vercel.app/seedcracker/documentation).
+SeedCracker runs on the **local API only** (`http://127.0.0.1:7890`, started with `server\start.bat` or `server/start.sh`). The hosted instance disables the route because the computation is too expensive to keep running for free; it answers with an `"unavailable"` list and a download link. Payload options: `tolerance` (0–8 chunks, default 6), `units` (`blocks` or `chunks`), `start`/`end` (seed range), `max` (default 500, cap 2000), `max_seconds` (default 30, 1–120). Full docs: [SeedCrackerX documentation](https://mineseedfinder.vercel.app/seedcracker/documentation).
 
 ## API reference
 
