@@ -278,6 +278,10 @@ server/start.sh
 
 Both scripts build `seedfinder_lib` via CMake into `build_server/`, then start the Flask server on port `7890`.
 
+**Build the Linux `.so` for Vercel (GitHub Actions)** — no VM needed:
+
+The `seedfinder_lib.so` that ships with the hosted instance (`server/seedfinder_lib.so`) is compiled by the **`build-lib`** workflow. It's **manual only**: open **Actions → build-lib → Run workflow** (never runs on a plain push). The workflow builds `core/` on Ubuntu, runs a smoke test (import, `seedfinder_crack` symbol, all pages + `/scan`), and uploads the library as the `seedfinder-lib` artifact. Download it, replace the tracked `server/seedfinder_lib.so`, commit, and Vercel auto-deploys.
+
 **Package into a Windows `.exe`**:
 
 ```bat
