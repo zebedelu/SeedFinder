@@ -12,11 +12,16 @@ import os
 
 from flask import Blueprint, Response, render_template, request, send_from_directory
 
+from .seedcracker import DOWNLOAD_URL, is_vercel
+
 pages_bp = Blueprint("pages", __name__)
 
 # Public routes listed in /sitemap.xml; served under the request's host so
 # the files work on any domain (Vercel, custom, local dev) without hardcoding.
-_PUBLIC_PATHS = ("/", "/seedfinder", "/seedfinder/documentation")
+_PUBLIC_PATHS = (
+    "/", "/seedfinder", "/seedfinder/documentation",
+    "/seedcracker", "/seedcracker/documentation",
+)
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # server/
 
@@ -36,6 +41,19 @@ def documentation():
     return render_template("documentation.html", active="docs")
 
 
+@pages_bp.route("/seedcracker")
+def seedcracker():
+    return render_template("seedcracker.html", active="seedcracker",
+                           is_vercel=is_vercel(), download_url=DOWNLOAD_URL)
+
+
+@pages_bp.route("/seedcracker/documentation")
+def seedcracker_documentation():
+    return render_template("seedcracker_documentation.html",
+                           active="seedcracker_docs", is_vercel=is_vercel(),
+                           download_url=DOWNLOAD_URL)
+
+
 @pages_bp.route("/robots.txt")
 def robots():
     txt = (
@@ -43,6 +61,7 @@ def robots():
         "Allow: /\n"
         "Disallow: /scan\n"
         "Disallow: /status\n"
+        "Disallow: /seedcracker\n"
         "\n"
         f"Sitemap: {request.url_root}sitemap.xml\n"
     )
@@ -84,6 +103,11 @@ SeedFinder is a free REST API that locates Minecraft Bedrock structures from the
 ### Structure IDs
 
 1=Desert Pyramid, 2=Jungle Temple, 3=Swamp Hut, 4=Igloo, 5=Village, 6=Ocean Ruin, 7=Shipwreck, 8=Ocean Monument, 9=Woodland Mansion, 10=Pillager Outpost, 11/12=Ruined Portal, 13=Ancient City, 14=Buried Treasure, 15=Mineshaft, 23=Trail Ruins, 24=Trial Chambers
+
+## SeedCracker (local API only)
+
+- `GET/POST {base}/seedcracker` - given a list of at least 4 structures with coordinates, returns the most probable Bedrock seeds. Runs on the local API; disabled on the hosted (Vercel) deployment because the computation is too expensive to run for free.
+- [SeedCracker documentation]({base}/seedcracker/documentation): payload format, parameters, structure IDs and real examples.
 
 ## Other
 
