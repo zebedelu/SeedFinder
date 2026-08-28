@@ -301,3 +301,8 @@ Bug reports, feature ideas, pull requests, and doc fixes are all welcome. For an
 ## Author
 
 [zebedelu](https://github.com/zebedelu)
+
+Contributors whose code is included in this project:
+
+- [@Nel-S](https://github.com/Nel-S) — ChunkBiomesGUI (Bedrock GUI + structure prediction)
+- [@Cubitect](https://github.com/Cubitect) — cubiomes (biome/structure engine, vendored in `ChunkBiomesGUI/cubiomes/`)
