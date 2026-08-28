@@ -44,7 +44,7 @@ def main():
         '--hidden-import', 'flask_cors',
         '--noupx',  # Avoid UPX compression issues with DLLs
         '--console',  # Keep console window visible for logs
-        '--icon=server\\logo\\logo.ico',
+        f'--icon={os.path.join(SERVER_DIR, "logo", "logo.ico")}',
         INDEX_FILE,
     ]
 
