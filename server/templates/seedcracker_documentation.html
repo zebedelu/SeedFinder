@@ -1,0 +1,438 @@
+{% extends "base.html" %}
+{% block title %}SeedCracker - Documentation{% endblock %}
+{% block description %}SeedCracker API documentation: POST/GET /seedcracker endpoint, structures list, tolerance, parameters, structure IDs, real examples and client examples.{% endblock %}
+{% block keywords %}seedcracker api, minecraft api, documentation, crack seed, bedrock structures{% endblock %}
+
+{% block content %}
+<section class="console-head">
+	<p class="breadcrumb"><a href="/">Home</a><span>/</span><a href="/seedcracker">SeedCracker</a><span>/</span>Documentation</p>
+	<h1 class="page-title">SeedCracker <span class="hero-accent">Documentation</span></h1>
+	<p class="page-sub">
+		SeedCrackerX is the reverse path of SeedFinder: give it at least 4
+		structures with coordinates and it returns the most probable Bedrock
+		world seeds. Everything returns JSON, in a standard list format.
+	</p>
+</section>
+
+<nav class="docs-toc" aria-label="Contents">
+	<details>
+		<summary>Contents</summary>
+		<ol>
+			<li><a href="#overview">Overview</a></li>
+			<li><a href="#availability">Availability</a></li>
+			<li><a href="#base-url">Base URL</a></li>
+			<li><a href="#endpoint">Endpoints POST/GET /seedcracker</a></li>
+			<li><a href="#params">Parameters</a></li>
+			<li><a href="#request">Request format</a></li>
+			<li><a href="#response">Response format</a></li>
+			<li><a href="#structure-ids">Structure IDs</a></li>
+			<li><a href="#live-example">Live examples (local)</a></li>
+			<li><a href="#clients">Client examples</a></li>
+			<li><a href="#performance">Performance &amp; notes</a></li>
+		</ol>
+	</details>
+</nav>
+
+<article class="docs">
+	<section id="overview">
+		<h2>Overview</h2>
+		<p>
+			SeedCracker searches the 32-bit Bedrock seed space in parallel (native
+			library) and keeps the seeds whose generated structures line up with the
+			coordinates you provide. The more structures you list - and the tighter
+			the <code class="inline">tolerance</code> - the fewer probable seeds come
+			back. Because a full sweep is measured in minutes, the request is bounded
+			by a time budget (<code class="inline">max_seconds</code>, default 30);
+			results are returned even when the search is stopped early.
+		</p>
+	</section>
+
+	<section id="availability">
+		<h2>Availability</h2>
+		<p>
+			SeedCracker runs on the <strong>local API only</strong>
+			(<code class="inline">http://127.0.0.1:7890</code>, started with
+			<code class="inline">server\start.bat</code> or
+			<code class="inline">server/start.sh</code>).
+		</p>
+		<div class="note">
+			The hosted (Vercel) deployment disables the route. The response is a
+			list with a single entry:
+		</div>
+		<div class="code-block">
+			<button class="copy-btn" data-target="unavailable-code">copy</button>
+			<pre><code id="unavailable-code">[
+  {
+    "status": "unavailable",
+    "message": "SeedCracker is not available on Vercel at the moment. This service is too expensive to keep running for free - please donate or use the offline/local version.",
+    "download": "https://github.com/zebedelu/SeedFinder/releases",
+    "docs": "/seedcracker/documentation"
+  }
+]</code></pre>
+		</div>
+		<p>
+			The computation is too expensive to host for free; download the tool
+			from GitHub or run it offline.
+		</p>
+	</section>
+
+	<section id="base-url">
+		<h2>Base URL</h2>
+		<div class="code-block">
+			<button class="copy-btn" data-target="base-url-code">copy</button>
+			<pre><code id="base-url-code">http://127.0.0.1:7890</code></pre>
+		</div>
+	</section>
+
+	<section id="endpoint">
+		<h2>Endpoints <code class="inline">POST /seedcracker</code> and <code class="inline">GET /seedcracker</code></h2>
+		<p>
+			Both verbs accept the same parameters. <code class="inline">POST</code>
+			uses a JSON body (recommended); <code class="inline">GET</code> uses the
+			query string with <code class="inline">structures</code> serialized as
+			semicolon-separated <code class="inline">type,x,z</code> groups.
+		</p>
+		<p class="doc-label">POST /seedcracker - 400 response:</p>
+		<div class="code-block">
+			<button class="copy-btn" data-target="err-400">copy</button>
+			<pre><code id="err-400">[
+  {
+    "status": "error",
+    "message": "at least 4 structures are required"
+  }
+]</code></pre>
+		</div>
+		<p class="doc-label">503 response (native library missing / not loaded):</p>
+		<div class="code-block">
+			<button class="copy-btn" data-target="err-503">copy</button>
+			<pre><code id="err-503">[
+  {
+    "status": "error",
+    "message": "SeedCracker native library (.dll/.so) not loaded on this server."
+  }
+]</code></pre>
+		</div>
+	</section>
+
+	<section id="params">
+		<h2>Parameters</h2>
+		<table class="param-table">
+			<thead>
+				<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td><code class="inline">structures</code></td>
+					<td>list</td>
+					<td>—</td>
+					<td>At least 4 structure objects: <code class="inline">{"type": int, "x": int, "z": int}</code>.</td>
+				</tr>
+				<tr>
+					<td><code class="inline">tolerance</code></td>
+					<td>int</td>
+					<td><code class="inline">6</code></td>
+					<td>Distance radius between a listed coordinate and a generated structure, in chunks (0..8). Lower = stronger match.</td>
+				</tr>
+				<tr>
+					<td><code class="inline">units</code></td>
+					<td>string</td>
+					<td><code class="inline">blocks</code></td>
+					<td><code class="inline">blocks</code> or <code class="inline">chunks</code> (chunks are the structure's anchor chunk).</td>
+				</tr>
+				<tr>
+					<td><code class="inline">start</code></td>
+					<td>int</td>
+					<td><code class="inline">0</code></td>
+					<td>First seed to test (inclusive); useful to resume a partial scan.</td>
+				</tr>
+				<tr>
+					<td><code class="inline">end</code></td>
+					<td>int</td>
+					<td><code class="inline">4294967296</code></td>
+					<td>Last seed to test (exclusive); the full Bedrock seed space is 2^32.</td>
+				</tr>
+				<tr>
+					<td><code class="inline">max</code></td>
+					<td>int</td>
+					<td><code class="inline">500</code></td>
+					<td>Result cap (1..2000). The best seeds by fit score are kept.</td>
+				</tr>
+				<tr>
+					<td><code class="inline">max_seconds</code></td>
+					<td>float</td>
+					<td><code class="inline">30</code></td>
+					<td>Time budget in seconds (1..120). Partial results are returned when it expires.</td>
+				</tr>
+			</tbody>
+		</table>
+	</section>
+
+	<section id="request">
+		<h2>Request format</h2>
+		<p>
+			The canonical body is a <strong>list</strong>: the first item is the
+			options object (tolerance and friends live at the root of the list),
+			followed by the structure objects.
+		</p>
+		<div class="code-block">
+			<button class="copy-btn" data-target="req-list">copy</button>
+			<pre><code id="req-list">[
+  {"tolerance": 0, "max_seconds": 120},
+  {"type": 5, "x": -280, "z": 152},
+  {"type": 5, "x": -280, "z": -360},
+  {"type": 8, "x": 696, "z": 360},
+  {"type": 8, "x": 712, "z": 760}
+]</code></pre>
+		</div>
+		<p>An object body with a <code class="inline">structures</code> key is accepted too:</p>
+		<div class="code-block">
+			<button class="copy-btn" data-target="req-obj">copy</button>
+			<pre><code id="req-obj">{
+  "tolerance": 0,
+  "max_seconds": 120,
+  "structures": [
+    {"type": 5, "x": -280, "z": 152},
+    {"type": 5, "x": -280, "z": -360},
+    {"type": 8, "x": 696, "z": 360},
+    {"type": 8, "x": 712, "z": 760}
+  ]
+}</code></pre>
+		</div>
+		<p class="doc-label">GET form:</p>
+		<div class="code-block">
+			<button class="copy-btn" data-target="req-get">copy</button>
+			<pre><code id="req-get">http://127.0.0.1:7890/seedcracker?tolerance=0&amp;max_seconds=120&amp;structures=5,-280,152;5,-280,-360;8,696,360;8,712,760</code></pre>
+		</div>
+	</section>
+
+	<section id="response">
+		<h2>Response format</h2>
+		<p>
+			The response is always a <strong>list</strong>. Item 0 is the header
+			(<code class="inline">status</code>: <code class="inline">ok</code>,
+			<code class="inline">partial</code> when the time budget ran out,
+			<code class="inline">error</code> or <code class="inline">unavailable</code>),
+			followed by the probable seeds with a <code class="inline">score</code>
+			(sum of squared chunk deviations across structures - lower is better)
+			and the matched structure chunk coordinates.
+		</p>
+		<div class="code-block">
+			<button class="copy-btn" data-target="resp-ok">copy</button>
+			<pre><code id="resp-ok">[
+  {
+    "status": "ok",
+    "message": "crack completed",
+    "structures": 4,
+    "tolerance": 0,
+    "units": "blocks",
+    "checked": 16000000,
+    "elapsed_ms": 2800,
+    "timed_out": false
+  },
+  {
+    "seed": 8675309,
+    "score": 0,
+    "matches": [[-18, 9], [-18, -23], [43, 22], [44, 47]]
+  }
+]</code></pre>
+		</div>
+	</section>
+
+	<section id="structure-ids">
+		<h2>Structure IDs</h2>
+		<p>
+			The cracker accepts the same IDs as SeedFinder, <strong>except
+			Mineshaft</strong> (15), which uses a per-chunk RNG and cannot be
+			searched by region.
+		</p>
+		<table class="param-table">
+			<thead>
+				<tr><th>ID</th><th>Name</th><th>ID</th><th>Name</th></tr>
+			</thead>
+			<tbody>
+				{% for (a, b) in [
+					(("1", "Desert Pyramid"),      ("11", "Ruined Portal")),
+					(("2", "Jungle Temple"),       ("13", "Ancient City")),
+					(("3", "Swamp Hut"),           ("14", "Buried Treasure")),
+					(("4", "Igloo"),               ("10", "Pillager Outpost")),
+					(("5", "Village"),             ("23", "Trail Ruins")),
+					(("6", "Ocean Ruin"),          ("24", "Trial Chambers")),
+					(("7", "Shipwreck"),           ("",   "")),
+					(("8", "Ocean Monument"),      ("",   "")),
+					(("9", "Woodland Mansion"),    ("",   "")),
+				] %}
+				<tr>
+					<td><code class="inline">{{ a[0] }}</code></td><td>{{ a[1] }}</td>
+					<td><code class="inline">{{ b[0] }}</code></td><td>{{ b[1] }}</td>
+				</tr>
+				{% endfor %}
+			</tbody>
+		</table>
+	</section>
+
+	<section id="live-example">
+		<h2>Live examples (local)</h2>
+		<p>
+			Run the server with <code class="inline">server\start.bat</code>, then
+			run the requests below. Example A cracks the exact seed
+			<code class="inline">8675309</code> from 2 villages and 2 monuments;
+			example B uses a 2-chunk tolerance on seed <code class="inline">31415</code>.
+		</p>
+
+		<h3>Example A - exact crack (tolerance 0)</h3>
+		<div class="code-block">
+			<a class="btn btn-ghost btn-copy-link" href="/seedcracker/documentation" target="_blank" rel="noopener">Open request ▸</a>
+			<button class="copy-btn" data-target="ex-a">copy</button>
+			<pre><code id="ex-a">curl -X POST http://127.0.0.1:7890/seedcracker \
+  -H "Content-Type: application/json" \
+  -d '[{"tolerance":0,"max_seconds":120},{"type":5,"x":-280,"z":152},{"type":5,"x":-280,"z":-360},{"type":8,"x":696,"z":360},{"type":8,"x":712,"z":760}]'</code></pre>
+		</div>
+		<p class="doc-label">Expected response:</p>
+		<div class="code-block">
+			<button class="copy-btn" data-target="resp-a">copy</button>
+			<pre><code id="resp-a">[
+  {"status":"partial","message":"search stopped by time budget - results are partial","structures":4,"tolerance":0,"units":"blocks","checked":660275200,"elapsed_ms":120000,"timed_out":true},
+  {"seed":8675309,"score":0,"matches":[[-18,9],[-18,-23],[43,22],[44,47]]}
+]</code></pre>
+		</div>
+		<div class="note">
+			The full 32-bit space takes several minutes, so the request stops at
+			<code class="inline">max_seconds</code> and returns
+			<code class="inline">"status": "partial"</code> with
+			<code class="inline">"checked"</code> seeds tested so far. The seed is
+			found early because the sweep starts at seed 0. Run the sweep fully
+			with <code class="inline">"max_seconds": 120</code> and a named
+			<code class="inline">"start"/"end"</code> range to resume it offline.
+		</div>
+
+		<h3>Example B - tolerance 2 (4 villages from seed 31415)</h3>
+		<div class="code-block">
+			<button class="copy-btn" data-target="ex-b">copy</button>
+			<pre><code id="ex-b">curl -X POST http://127.0.0.1:7890/seedcracker \
+  -H "Content-Type: application/json" \
+  -d '[{"tolerance":2,"max_seconds":30,"max":50},{"type":5,"x":712,"z":-520},{"type":5,"x":-360,"z":-840},{"type":5,"x":168,"z":1176},{"type":5,"x":136,"z":-1352}]'</code></pre>
+		</div>
+		<p class="doc-label">Expected response (first item + the top seed):</p>
+		<div class="code-block">
+			<button class="copy-btn" data-target="resp-b">copy</button>
+			<pre><code id="resp-b">[
+  {"status":"partial","message":"search stopped by time budget - results are partial","structures":4,"tolerance":2,"units":"blocks","checked":615841792,"elapsed_ms":120000,"timed_out":true},
+  {"seed":31415,"score":0,"matches":[[44,-33],[-23,-53],[10,73],[8,-85]]}
+]</code></pre>
+		</div>
+		<p>
+			A looser tolerance admits many seeds (hundreds with a 2-chunk radius).
+			The best one by score - seed <code class="inline">31415</code> - is on
+			top; the <code class="inline">matches</code> order follows the order of
+			the structures you submitted.
+		</p>
+	</section>
+
+	<section id="clients">
+		<h2>Client examples</h2>
+		<p>
+			Pick a language below to see how to call <code class="inline">/seedcracker</code>
+			with <code class="inline">requests</code> (Python) or
+			<code class="inline">network.post</code> (Lua, e.g. inside Flarial Client).
+		</p>
+
+		<div class="lang-tabs">
+			<button data-lang="python" class="active">Python</button>
+			<button data-lang="lua">Lua</button>
+		</div>
+
+		<div class="code-block lang-panel" data-lang="python">
+			<button class="copy-btn" data-target="code-python">copy</button>
+			<pre><code id="code-python">import requests
+
+BASE = "http://127.0.0.1:7890"
+
+# Standard list form: options object first, then the structures.
+payload = [
+    {"tolerance": 0, "max_seconds": 120, "max": 50},
+    {"type": 5, "x": -280, "z": 152},
+    {"type": 5, "x": -280, "z": -360},
+    {"type": 8, "x": 696, "z": 360},
+    {"type": 8, "x": 712, "z": 760},
+]
+
+r = requests.post(f"{BASE}/seedcracker", json=payload, timeout=200)
+r.raise_for_status()
+data = r.json()  # list: [header, seed, seed, ...]
+
+print(data[0])  # {"status": "ok", "checked": ..., ...}
+for result in data[1:]:
+    print(f"seed={result['seed']} score={result['score']} matches={result['matches']}")</code></pre>
+		</div>
+
+		<div class="code-block lang-panel" data-lang="lua" hidden>
+			<button class="copy-btn" data-target="code-lua">copy</button>
+			<pre><code id="code-lua">-- Drop-in for Flarial Client modules. `network` is a Flarial global.
+local BASE = "http://127.0.0.1:7890"
+
+local payload = {
+    { tolerance = 0, max_seconds = 120, max = 50 },
+    { type = 5, x = -280, z = 152 },
+    { type = 5, x = -280, z = -360 },
+    { type = 8, x = 696,  z = 360 },
+    { type = 8, x = 712,  z = 760 },
+}
+
+local resp = network.post(BASE .. "/seedcracker", jsonencode(payload))
+if not resp or resp.code ~= 200 then
+    print("[seedcracker] HTTP error: " .. tostring(resp and resp.code))
+    return nil
+end
+print(resp.body)  -- JSON list; decode with your JSON lib if needed</code></pre>
+		</div>
+	</section>
+
+	<section id="performance">
+		<h2>Performance &amp; notes</h2>
+		<ul>
+			<li>The search sweeps the 32-bit seed space with as many threads as CPU cores (capped at 64).</li>
+			<li>Structures with the smallest generation cell are tested first, so most seeds are rejected after one or two checks.</li>
+			<li><code class="inline">tolerance</code> is a radius in chunks (Euclidean), default 6. With tolerance 0 a fixed set of coordinates usually maps to a single seed.</li>
+			<li>The result cap keeps the <code class="inline">max</code> best seeds by score; a looser tolerance makes many seeds pass - narrow it for a sharper answer.</li>
+			<li>Mineshaft (15) is rejected; <code class="inline">tolerance</code> beyond 8 is rejected; <code class="inline">max_seconds</code> beyond 120 is capped.</li>
+		</ul>
+	</section>
+</article>
+{% endblock %}
+
+{% block scripts %}
+<script>
+	// Language tabs
+	(function () {
+		const tabs = document.querySelectorAll(".lang-tabs button");
+		const panels = document.querySelectorAll(".lang-panel");
+		tabs.forEach((tab) => {
+			tab.addEventListener("click", () => {
+				const lang = tab.dataset.lang;
+				tabs.forEach((t) => t.classList.toggle("active", t === tab));
+				panels.forEach((p) => {
+					p.hidden = p.dataset.lang !== lang;
+				});
+			});
+		});
+	})();
+
+	// Copy buttons for every code block
+	(function () {
+		document.querySelectorAll(".copy-btn").forEach((btn) => {
+			btn.addEventListener("click", async () => {
+				const target = document.getElementById(btn.dataset.target);
+				if (!target) return;
+				try {
+					await navigator.clipboard.writeText(
+						target.dataset.copyText ?? target.textContent,
+					);
+					const original = btn.textContent;
+					btn.textContent = "copied!";
+					setTimeout(() => { btn.textContent = original; }, 1200);
+				} catch (e) { /* clipboard unavailable - ignore */ }
+			});
+		});
+	})();
+</script>
+{% endblock %}
