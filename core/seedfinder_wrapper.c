@@ -387,6 +387,10 @@ SEEDFINDER_API char *seedfinder_crack(
             return strdup("{\"error\":\"invalid coordinates\"}");
     }
 
+    /* Keep an input-ordered copy for serializing matches back to the caller. */
+    CrackTarget orig[CRACK_MAX_STRUCTURES];
+    memcpy(orig, targets, (size_t)numTypes * sizeof(CrackTarget));
+
     /* Strongest filter first. */
     qsort(targets, numTypes, sizeof(CrackTarget), crackTargetCompare);
 
@@ -454,7 +458,7 @@ SEEDFINDER_API char *seedfinder_crack(
                        i ? "," : "", (unsigned long long)all[i].seed,
                        (long long)all[i].score);
         for (int k = 0; k < numTypes; k++) {
-            const CrackTarget *t = &targets[k];
+            const CrackTarget *t = &orig[k];
             int bx = 0, bz = 0, bd = INT32_MAX;
             for (int r = 0; r < t->numRegions; r++) {
                 Pos pos;
