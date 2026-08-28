@@ -9,9 +9,14 @@
 	<h1 class="page-title">Seed<span class="hero-accent">Finder</span> Console</h1>
 	<p class="page-sub">
 		Enter the seed, position and structure types. The scan walks the regions
-		around the player and returns everything sorted by distance.
+		around the player and returns everything sorted by distance. Coordinates
+		are shown as <code class="inline">x~z</code> so you can copy them straight
+		into the game.
 	</p>
-	<span id="api-status" class="chip soon"><i></i> Checking API...</span>
+	<div class="head-actions">
+		<span id="api-status" class="chip soon"><i></i> Checking API...</span>
+		<a class="btn btn-ghost" href="/seedfinder/documentation">Documentation ▸</a>
+	</div>
 </section>
 
 <section class="console-grid">
@@ -76,25 +81,6 @@
 <script>
 	const $ = (id) => document.getElementById(id);
 
-	// API health on load
-	(async () => {
-		const chip = $("api-status");
-		try {
-			const r = await fetch("/status");
-			const d = await r.json();
-			if (r.ok && d.status === "ok") {
-				chip.className = "chip ok";
-				chip.innerHTML = `<i></i> API online${d.version ? " - " + d.version : ""}`;
-			} else {
-				chip.className = "chip bad";
-				chip.innerHTML = "<i></i> API unavailable";
-			}
-		} catch (_) {
-			chip.className = "chip bad";
-			chip.innerHTML = "<i></i> Failed to reach the API";
-		}
-	})();
-
 	async function scan() {
 		const seed = $("seed").value.trim();
 		const x = $("x").value;
@@ -134,12 +120,12 @@
 					<tr${i === 0 ? ' class="nearest"' : ""}>
 						<td class="rank">#${i + 1}</td>
 						<td class="name">▸ ${s.name}</td>
-						<td class="coord">${s.x}<span class="coord-sep">/</span>${s.z}</td>
+						<td class="coord">${s.x}<span class="coord-sep">~</span>${s.z}</td>
 						<td class="dist">${Number(s.distance).toFixed(1)} ch</td>
 					</tr>`)
 				.join("");
 			render(`<table class="result-table">
-				<thead><tr><th>#</th><th>Structure</th><th>X / Z</th><th>Distance</th></tr></thead>
+				<thead><tr><th>#</th><th>Structure</th><th>X ~ Z</th><th>Distance</th></tr></thead>
 				<tbody>${rows}</tbody></table>
 				<p class="results-meta">${data.results.length} structure(s) found</p>`);
 		} catch (err) {

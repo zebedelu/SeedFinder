@@ -38,7 +38,7 @@ def seedfinder():
 
 @pages_bp.route("/seedfinder/documentation")
 def documentation():
-    return render_template("documentation.html", active="docs")
+    return render_template("seedfinder_documentation.html", active="docs")
 
 
 @pages_bp.route("/seedcracker/documentation")

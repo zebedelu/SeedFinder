@@ -381,6 +381,9 @@ a:hover { text-decoration: none; }
 /* ---------- Console page (seedfinder) ---------- */
 .console-head { margin-bottom: 32px; animation: rise 0.5s ease both; }
 
+.head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.head-actions .btn { align-self: flex-start; }
+
 .breadcrumb {
 	margin: 0 0 10px;
 	font-size: 12.5px;

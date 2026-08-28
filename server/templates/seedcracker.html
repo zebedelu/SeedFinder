@@ -11,7 +11,10 @@
 		From the structures you found in the world, work out the most probable
 		Bedrock seed. List at least 4 structures with their block coordinates.
 	</p>
-	<a class="btn btn-ghost" style="align-self:flex-start" href="/seedcracker/documentation">Documentation ▸</a>
+	<div class="head-actions">
+		<span id="api-status" class="chip soon"><i></i> Checking API...</span>
+		<a class="btn btn-ghost" href="/seedcracker/documentation">Documentation ▸</a>
+	</div>
 </section>
 
 {% if is_vercel %}
@@ -34,11 +37,7 @@
 {% else %}
 <section class="console-grid">
 	<div class="card panel">
-		<h2 class="panel-title">Structures + tolerance</h2>
-		<div class="field">
-			<label for="tolerance">Tolerance (chunks, default 6)</label>
-			<input id="tolerance" type="number" value="0" min="0" max="8" />
-		</div>
+		<h2 class="panel-title">Structures</h2>
 		<div class="field field-wide">
 			<label for="payload">Payload (standard list format)</label>
 			<textarea id="payload" rows="12" spellcheck="false">[
@@ -48,6 +47,15 @@
   {"type": 8, "x": 696, "z": 360},
   {"type": 8, "x": 712, "z": 760}
 ]</textarea>
+		</div>
+		<div class="note arg-help">
+			<strong>Payload arguments</strong>
+			<ul style="margin:8px 0 0; padding-left:18px; display:grid; gap:4px;">
+				<li><code class="inline">tolerance</code> — match radius in chunks (0–8); lower means a stronger match.</li>
+				<li><code class="inline">max_seconds</code> — time budget in seconds (1–120); partial results are returned when it expires.</li>
+				<li><code class="inline">type</code> — structure ID (5 = Village, 8 = Monument, ...).</li>
+				<li><code class="inline">x</code>, <code class="inline">z</code> — block coordinates of the structure.</li>
+			</ul>
 		</div>
 		<button id="crack-btn" class="btn btn-primary btn-wide" onclick="crack()">Crack&nbsp;▸</button>
 	</div>
@@ -80,7 +88,6 @@
 		try {
 			payload = JSON.parse($("payload").value);
 			if (!Array.isArray(payload)) throw new Error("expected a list");
-			payload[0] = { ...payload[0], tolerance: Number($("tolerance").value) };
 		} catch (e) {
 			renderError("Invalid JSON: " + e.message);
 			btn.disabled = false;

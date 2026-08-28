@@ -36,7 +36,6 @@
 			<a class="nav-link {% if active == 'home' %}active{% endif %}" href="/">Home</a>
 			<a class="nav-link {% if active == 'seedfinder' %}active{% endif %}" href="/seedfinder">SeedFinder</a>
 			<a class="nav-link {% if active == 'seedcracker' or active == 'seedcracker_docs' %}active{% endif %}" href="/seedcracker">SeedCracker</a>
-			<a class="nav-link {% if active == 'docs' %}active{% endif %}" href="/seedfinder/documentation">Documentation</a>
 			<a class="nav-link nav-github" href="https://github.com/zebedelu/SeedFinder" target="_blank" rel="noopener">GitHub</a>
 		</div>
 	</nav>
@@ -61,6 +60,29 @@
 				const open = links.classList.toggle("open");
 				toggle.setAttribute("aria-expanded", String(open));
 			});
+		})();
+	</script>
+
+	<script>
+		// Shared API health check: any element with id="api-status" gets
+		// turned into an online/offline chip as soon as the page loads.
+		(async function () {
+			const chip = document.getElementById("api-status");
+			if (!chip) return;
+			try {
+				const r = await fetch("/status");
+				const d = await r.json();
+				if (r.ok && (d.status === "ok" || d.ok)) {
+					chip.className = "chip ok";
+					chip.innerHTML = `<i></i> API online${d.version ? " - " + d.version : ""}`;
+				} else {
+					chip.className = "chip bad";
+					chip.innerHTML = "<i></i> API unavailable";
+				}
+			} catch (_) {
+				chip.className = "chip bad";
+				chip.innerHTML = "<i></i> Failed to reach the API";
+			}
 		})();
 	</script>
 	{% block scripts %}{% endblock %}
