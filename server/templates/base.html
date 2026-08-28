@@ -48,6 +48,12 @@
 	{% endblock %}
 </head>
 <body>
+	{% if local_mode %}
+	<script>
+		// Local build warning: Flask binds 0.0.0.0, so the whole LAN can hit the API.
+		alert("Você está executando em modo local, qualquer um na rede pode acessar a API e utilizar desses serviços!");
+	</script>
+	{% endif %}
 	<div class="grid-bg" aria-hidden="true"></div>
 	<nav class="nav">
 		<a class="nav-brand" href="/">

@@ -7,7 +7,7 @@ runtimes call. Running the file directly starts a local dev server.
 import argparse
 import os
 
-from app import create_app, native
+from app import create_app, console, native
 
 app = create_app()
 
@@ -41,5 +41,6 @@ if __name__ == "__main__":
                     native._candidates()[0])
 
     native.load_lib(_resolve(args.lib_path))
-    print(f"SeedFinder server starting on http://{args.host}:{args.port}")
+    console.print_banner(args.host, args.port, _resolve(args.lib_path),
+                         native.lib is not None)
     app.run(host=args.host, port=args.port, debug=False)

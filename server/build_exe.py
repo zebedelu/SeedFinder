@@ -47,6 +47,13 @@ def main():
         f'--icon={os.path.join(SERVER_DIR, "logo", "logo.ico")}',
         INDEX_FILE,
     ]
+    # Bundle the HTML/static assets: in the frozen exe they are extracted to
+    # _MEIPASS/, where app/__init__.py already resolves template/static paths.
+    for asset in ('templates', 'static', 'logo'):
+        cmd += [
+            '--add-data',
+            f'{os.path.join(SERVER_DIR, asset)}{os.pathsep}{asset}',
+        ]
 
     print('Building SeedFinder.exe with PyInstaller...')
     print(' '.join(cmd))

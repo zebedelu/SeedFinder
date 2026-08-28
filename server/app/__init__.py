@@ -6,7 +6,7 @@ place so the Vercel entrypoint stays a thin WSGI import.
 
 import os
 
-from flask import Flask
+from flask import Flask, request
 from flask_cors import CORS
 
 from . import native
@@ -26,6 +26,12 @@ def create_app() -> Flask:
         static_folder=os.path.join(_BASE, "static"),
     )
     CORS(app)
+
+    @app.context_processor
+    def inject_local_mode():
+        # True when served from a local host (exe / start.bat / start.sh);
+        # lets templates show a network warning that Vercel pages skip.
+        return {"local_mode": request.host.startswith(("127.0.0.1", "localhost"))}
 
     # On Vercel there is no main() — the lib must be ready by import time.
     native.bootstrap_lib()
