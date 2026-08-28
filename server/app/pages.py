@@ -41,12 +41,6 @@ def documentation():
     return render_template("documentation.html", active="docs")
 
 
-@pages_bp.route("/seedcracker")
-def seedcracker():
-    return render_template("seedcracker.html", active="seedcracker",
-                           is_vercel=is_vercel(), download_url=DOWNLOAD_URL)
-
-
 @pages_bp.route("/seedcracker/documentation")
 def seedcracker_documentation():
     return render_template("seedcracker_documentation.html",

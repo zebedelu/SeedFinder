@@ -280,7 +280,7 @@ And the honest tradeoff: this is a Bedrock-specific, Flarial-specific project wi
 ## Roadmap
 
 - **Direct Lua↔C bridge** (`core/SeedFinderBridge.cpp`) - compile the engine straight into the Flarial Client DLL and expose `seedfinder_bridge.scanStructures(...)` to Lua, removing the HTTP hop for the in-game path.
-- **SeedCracker** - listed as "coming soon" in the hosted API's navigation. Cracking a seed from observed structures, rather than scanning from a known one.
+- **SeedCracker** (`/seedcracker`) - the reverse path: give it at least 4 structures with coordinates and it returns the most probable Bedrock seeds. It sweeps the 32-bit seed space in parallel inside the native library, bounded by a time budget. Runs on the local API only (the far-end record of the hosted deployment is expensive to run for free, so Vercel returns an "unavailable" list). Docs: `/seedcracker/documentation`. Test: `python server/tests/test_seedcracker.py`.
 - **Amethyst Geode and Desert Well support** - IDs `17` and `16` are per-chunk placement features (not region structures) and are not available. Geode prediction would additionally require simulating cave air volume, which the engine doesn't model.
 - **Nether/End structures** - Bastion, Fortress, and End City configs already exist internally but aren't wired into the public `types` list yet.
 

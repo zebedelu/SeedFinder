@@ -15,7 +15,7 @@ import json
 import os
 import time
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, render_template, request
 
 from . import native
 
@@ -179,6 +179,12 @@ def _run(structures, tolerance, units, opts):
 
 @seedcracker_bp.route("/seedcracker", methods=["GET", "POST"])
 def seedcracker():
+    # The same path serves the HTML console (plain GET) and the API (any
+    # request that carries structures). A GET with the structures param is
+    # the API's query-string form; a bare GET renders the page.
+    if request.method == "GET" and not request.args.get("structures"):
+        return render_template("seedcracker.html", active="seedcracker",
+                               is_vercel=is_vercel(), download_url=DOWNLOAD_URL)
     if is_vercel():
         return jsonify(UNAVAILABLE)
     try:
