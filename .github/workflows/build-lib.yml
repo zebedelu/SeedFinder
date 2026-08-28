@@ -25,10 +25,11 @@ jobs:
           python3 -m venv .venv
           .venv/bin/pip install -q flask flask-cors
           .venv/bin/python - <<'PY'
+          # bootstrap_lib runs inside create_app(), so create the app first.
           from app import create_app, native
+          app = create_app()
           assert native.lib is not None, "native lib not loaded"
           assert hasattr(native.lib, "seedfinder_crack"), "missing seedfinder_crack"
-          app = create_app()
           c = app.test_client()
           for path in ("/", "/seedfinder", "/seedfinder/documentation",
                        "/seedcracker", "/seedcracker/documentation",
