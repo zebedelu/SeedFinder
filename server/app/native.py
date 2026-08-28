@@ -20,6 +20,19 @@ _SCAN_ARGTYPES = [
     ctypes.c_int,     # number of types
 ]
 
+_CRACK_ARGTYPES = [
+    ctypes.POINTER(ctypes.c_int),    # structure type ids
+    ctypes.c_int,                    # number of structures
+    ctypes.POINTER(ctypes.c_double), # x block coordinates
+    ctypes.POINTER(ctypes.c_double), # z block coordinates
+    ctypes.c_int,                    # tolerance in chunks
+    ctypes.c_uint64,                 # start seed (inclusive)
+    ctypes.c_uint64,                 # end seed (exclusive)
+    ctypes.c_int,                    # max results
+    ctypes.c_double,                 # time budget in seconds
+    ctypes.c_int,                    # number of threads
+]
+
 
 def _bind(handle) -> None:
     """Attach argvtypes/restypes to a freshly loaded CDLL handle."""
@@ -30,6 +43,9 @@ def _bind(handle) -> None:
     handle.seedfinder_free_result.restype = None
     handle.seedfinder_status.argtypes = []
     handle.seedfinder_status.restype = ctypes.c_char_p
+    handle.seedfinder_crack.argtypes = _CRACK_ARGTYPES
+    # c_void_p keeps the raw malloc'd pointer; freed via seedfinder_free_result.
+    handle.seedfinder_crack.restype = ctypes.c_void_p
 
 
 def _candidates() -> list[str]:
