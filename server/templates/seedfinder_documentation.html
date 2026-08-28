@@ -3,6 +3,20 @@
 {% block description %}SeedFinder API documentation: GET /status and /scan endpoints, seed, x, z, radius, max and types parameters, structure IDs and code examples in Python, Lua and Node.js.{% endblock %}
 {% block keywords %}seedfinder api, minecraft api, documentation, rest api, bedrock structures{% endblock %}
 
+{% block structured_data %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "SeedFinder API",
+  "url": "{{ request.url_root.rstrip('/') }}{{ request.path }}",
+  "applicationCategory": "UtilityApplication",
+  "operatingSystem": "Any",
+  "description": "Free REST API to find Minecraft Bedrock structures from a seed and player position."
+}
+</script>
+{% endblock %}
+
 {% block content %}
 <section class="console-head">
 	<p class="breadcrumb"><a href="/">Home</a><span>/</span><a href="/seedfinder">SeedFinder</a><span>/</span>Documentation</p>

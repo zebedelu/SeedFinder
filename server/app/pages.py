@@ -81,31 +81,41 @@ def llms():
     base = request.url_root.rstrip("/")
     txt = f"""# SeedFinder
 
-SeedFinder is a free REST API that locates Minecraft Bedrock structures from the world seed and the player position: villages, ancient cities, ocean monuments, buried treasure, mansions and more. No sign-up and no auth.
+> Free REST API and Flarial Client module that finds Minecraft Bedrock structures (villages, ancient cities, ocean monuments, buried treasure, woodland mansions and more) from the world seed and player position. SeedCrackerX is the reverse tool: recover the most probable Bedrock world seed from a list of at least 4 structure coordinates.
 
-## Pages
+## Sections
 
-- [Home]({base}/): landing page with links to the console and the documentation.
-- [SeedFinder console]({base}/seedfinder): interactive console to run a structure scan in the browser.
-- [API documentation]({base}/seedfinder/documentation): full documentation of the /status and /scan endpoints, parameters, structure IDs and client examples.
+- [Home]({base}/): landing page with links to both consoles and their documentation.
+- [SeedFinder console]({base}/seedfinder): run a structure scan in the browser.
+- [SeedFinder API documentation]({base}/seedfinder/documentation): /status and /scan endpoints, parameters, structure IDs, client examples.
+- [SeedCrackerX console]({base}/seedcracker): recover the most probable seed from structure coordinates (local API only).
+- [SeedCrackerX documentation]({base}/seedcracker/documentation): /seedcracker payload, parameters, response format, live examples.
 
-## API
+## SeedFinder API
 
-- `GET {base}/status` - API health check.
-- `GET {base}/scan?seed=SEED&x=X&z=Z&radius=R&max=M&types=IDS` - finds structures around a position. `radius` and `max` are capped at 1000. `types` is a comma-separated list of IDs.
+- `GET {base}/status` - health check; returns `{{"status": "ok"}}` or a 500 error when the native library failed to load.
+- `GET {base}/scan?seed=SEED&x=X&z=Z&radius=R&max=M&types=IDS` - lists structures near a position, sorted by distance. `radius` and `max` are capped at 1000; `types` is a comma-separated list of structure IDs. Any missing or invalid parameter is replaced by its default and reported in `missing_or_invalid`.
+- Response: `{{"results": [{{"name": "village", "x": 696, "z": 376, "distance": 48.8}}], "missing_or_invalid": []}}` - `distance` in chunks, one decimal.
 
-### Structure IDs
+## SeedCrackerX API (local API only)
 
-1=Desert Pyramid, 2=Jungle Temple, 3=Swamp Hut, 4=Igloo, 5=Village, 6=Ocean Ruin, 7=Shipwreck, 8=Ocean Monument, 9=Woodland Mansion, 10=Pillager Outpost, 11/12=Ruined Portal, 13=Ancient City, 14=Buried Treasure, 15=Mineshaft, 23=Trail Ruins, 24=Trial Chambers
+- `POST {base}/seedcracker` (also `GET`) - given at least 4 structures with `type`/`x`/`z`, returns the most probable Bedrock seeds. Sweeps the 32-bit seed space in parallel (native, multi-threaded), bounded by a time budget.
+- POST body (canonical list form): `[{{"tolerance": 0, "max_seconds": 120}}, {{"type": 5, "x": -280, "z": 152}}, ...]`; a JSON object `{{"structures": [...]}}` is also accepted, and GET uses `?structures=5,-280,152;8,696,360`.
+- Options: `tolerance` (0-8 chunks, default 6; lower = stronger match), `units` (`blocks` default or `chunks`), `start`/`end` (seed range, default full 32-bit space), `max` (result cap, default 500, max 2000), `max_seconds` (time budget, default 30, 1-120; partial results are returned when it expires).
+- Response is always a JSON list: a header item `{{"status": "ok"|"partial"|"error"|"unavailable", "message", "structures", "tolerance", "units", "checked", "elapsed_ms", "timed_out"}}` followed by `{{"seed": 8675309, "score": 0, "matches": [[x, z], ...]}}` per probable seed.
+- Disabled on the hosted (Vercel) deployment: computing the full sweep is too expensive to run for free, so the route answers with an `"unavailable"` list and a GitHub download link. Run the local server (`server\\start.bat` / `server/start.sh`) to use it.
 
-## SeedCracker (local API only)
+## Structure IDs
 
-- `GET/POST {base}/seedcracker` - given a list of at least 4 structures with coordinates, returns the most probable Bedrock seeds. Runs on the local API; disabled on the hosted (Vercel) deployment because the computation is too expensive to run for free.
-- [SeedCracker documentation]({base}/seedcracker/documentation): payload format, parameters, structure IDs and real examples.
+`types` for /scan accepts: 1 Desert Pyramid, 2 Jungle Temple, 3 Swamp Hut, 4 Igloo, 5 Village, 6 Ocean Ruin, 7 Shipwreck, 8 Ocean Monument, 9 Woodland Mansion, 10 Pillager Outpost, 11 Ruined Portal, 12 Ruined Portal (Nether), 13 Ancient City, 14 Buried Treasure, 15 Mineshaft, 23 Trail Ruins, 24 Trial Chambers. (16 Desert Well and 17 Amethyst Geode are not supported.)
 
-## Other
+SeedCrackerX accepts types 1-11, 13, 14, 23, 24 (Mineshaft 15 is rejected - it uses a per-chunk RNG and cannot be searched by region).
 
-- [GitHub repository](https://github.com/zebedelu/SeedFinder): source code, builds and usage instructions.
+## Deployment
+
+- Hosted API: https://mineseedfinder.vercel.app (SeedCrackerX disabled).
+- Local server: run `server\\start.bat` (Windows) or `server/start.sh` (Linux); answers on http://127.0.0.1:7890.
+- Source, releases and the offline executable: https://github.com/zebedelu/SeedFinder.
 """
     return Response(txt, mimetype="text/plain")
 

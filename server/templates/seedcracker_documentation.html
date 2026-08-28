@@ -1,7 +1,21 @@
 {% extends "base.html" %}
-{% block title %}SeedCracker - Documentation{% endblock %}
+{% block title %}SeedCrackerX - Documentation{% endblock %}
 {% block description %}SeedCracker API documentation: POST/GET /seedcracker endpoint, structures list, tolerance, parameters, structure IDs, real examples and client examples.{% endblock %}
 {% block keywords %}seedcracker api, minecraft api, documentation, crack seed, bedrock structures{% endblock %}
+
+{% block structured_data %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "SeedCrackerX Documentation - Recover Minecraft Bedrock seeds from structure coordinates",
+  "url": "{{ request.url_root.rstrip('/') }}{{ request.path }}",
+  "about": "SeedCrackerX recovers the most probable Minecraft Bedrock world seed from a list of at least 4 structure coordinates by sweeping the 32-bit seed space.",
+  "proficiencyLevel": "Intermediate",
+  "inLanguage": "en"
+}
+</script>
+{% endblock %}
 
 {% block content %}
 <section class="console-head">

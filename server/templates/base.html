@@ -17,6 +17,35 @@
 	<link rel="stylesheet" href="{{ url_for('static', filename='style/main.css') }}" />
 	<script defer src="/_vercel/insights/script.js"></script>
 	{% block head %}{% endblock %}
+	{% block og %}
+	<meta property="og:type" content="website" />
+	<meta property="og:site_name" content="SeedFinder" />
+	<meta property="og:locale" content="en_US" />
+	<meta property="og:title" content="{{ self.title() }}" />
+	<meta property="og:description" content="{{ self.description() }}" />
+	<meta property="og:url" content="{{ request.url_root.rstrip('/') }}{{ request.path }}" />
+	<meta property="og:image" content="https://github.com/zebedelu/SeedFinder/raw/main/server/logo/logo.ico" />
+	<meta name="twitter:card" content="summary" />
+	<meta name="twitter:title" content="{{ self.title() }}" />
+	<meta name="twitter:description" content="{{ self.description() }}" />
+	<link rel="canonical" href="{{ request.url_root.rstrip('/') }}{{ request.path }}" />
+	{% endblock %}
+	{% block structured_data %}
+	<script type="application/ld+json">
+	{
+	  "@context": "https://schema.org",
+	  "@type": "WebSite",
+	  "name": "SeedFinder",
+	  "alternateName": "SeedFinder - Minecraft Bedrock Structure Finder",
+	  "url": "{{ request.url_root.rstrip('/') }}",
+	  "description": "{{ self.description() }}",
+	  "applicationCategory": "GameApplication",
+	  "operatingSystem": "Windows, Linux, Web",
+	  "genre": "Minecraft utilities",
+	  "inLanguage": "en"
+	}
+	</script>
+	{% endblock %}
 </head>
 <body>
 	<div class="grid-bg" aria-hidden="true"></div>
