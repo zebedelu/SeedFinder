@@ -12,6 +12,7 @@ from flask_cors import CORS
 from . import native
 from .api import api_bp
 from .pages import pages_bp
+from .seedcracker import seedcracker_bp
 
 # The app package lives in server/app, but templates/static sit one level
 # up alongside index.py. Point flask at them explicitly.
@@ -31,6 +32,7 @@ def create_app() -> Flask:
 
     app.register_blueprint(api_bp)
     app.register_blueprint(pages_bp)
+    app.register_blueprint(seedcracker_bp)
 
     @app.errorhandler(404)
     def not_found(_):
