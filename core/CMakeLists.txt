@@ -49,7 +49,16 @@ target_include_directories(seedfinder_lib PRIVATE
  ${SEEDFINDER_ROOT}/ChunkBiomesGUI
  ${SEEDFINDER_ROOT}/ChunkBiomesGUI/cubiomes
 )
+# SeedCracker threading: Win32 threads on Windows (DLL stays self-contained
+# under MinGW), pthreads on other platforms.
+if(NOT WIN32)
+	find_package(Threads REQUIRED)
+endif()
+
 target_link_libraries(seedfinder_lib PRIVATE bfinders_static cubiomes_static)
+if(NOT WIN32)
+	target_link_libraries(seedfinder_lib PRIVATE Threads::Threads)
+endif()
 
 set_target_properties(seedfinder_lib PROPERTIES
  WINDOWS_EXPORT_ALL_SYMBOLS OFF
