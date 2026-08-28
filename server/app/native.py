@@ -43,9 +43,14 @@ def _bind(handle) -> None:
     handle.seedfinder_free_result.restype = None
     handle.seedfinder_status.argtypes = []
     handle.seedfinder_status.restype = ctypes.c_char_p
-    handle.seedfinder_crack.argtypes = _CRACK_ARGTYPES
-    # c_void_p keeps the raw malloc'd pointer; freed via seedfinder_free_result.
-    handle.seedfinder_crack.restype = ctypes.c_void_p
+    # seedfinder_crack is absent from .so builds predating SeedCrackerX (e.g.
+    # the stale lib shipped to Vercel). /seedcracker already gates availability
+    # by environment, so a lib without the symbol is a valid state - bind only
+    # when present or the whole app dies at import.
+    if hasattr(handle, "seedfinder_crack"):
+        handle.seedfinder_crack.argtypes = _CRACK_ARGTYPES
+        # c_void_p keeps the raw malloc'd pointer; freed via seedfinder_free_result.
+        handle.seedfinder_crack.restype = ctypes.c_void_p
 
 
 def _candidates() -> list[str]:

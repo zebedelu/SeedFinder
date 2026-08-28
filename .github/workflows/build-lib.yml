@@ -1,0 +1,46 @@
+name: build-lib
+
+# Manual only: click "Run workflow" in the Actions tab. The .so never
+# rebuilds on a plain push; the button is the deliberate trigger.
+on:
+  workflow_dispatch:
+
+jobs:
+  build-lib:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build seedfinder_lib.so
+        run: |
+          cmake -S core -B build_server
+          cmake --build build_server -j$(nproc)
+
+      - name: Stage the fresh lib where Vercel will pick it up
+        run: cp build_server/seedfinder_lib.so server/seedfinder_lib.so
+
+      - name: Smoke test (import + routes + scan)
+        working-directory: server
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -q flask flask-cors
+          .venv/bin/python - <<'PY'
+          from app import create_app, native
+          assert native.lib is not None, "native lib not loaded"
+          assert hasattr(native.lib, "seedfinder_crack"), "missing seedfinder_crack"
+          app = create_app()
+          c = app.test_client()
+          for path in ("/", "/seedfinder", "/seedfinder/documentation",
+                       "/seedcracker", "/seedcracker/documentation",
+                       "/robots.txt", "/sitemap.xml", "/llms.txt", "/status",
+                       "/scan?seed=8675309&x=0&z=0&radius=100&max=20&types=5,1,10"):
+              r = c.get(path)
+              assert r.status_code == 200, f"{path} -> {r.status_code}"
+          print("SMOKE OK")
+          PY
+
+      - name: Upload seedfinder_lib.so artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: seedfinder-lib
+          path: server/seedfinder_lib.so
