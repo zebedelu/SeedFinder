@@ -76,4 +76,10 @@ CLAUDE.md
 server/dist/
 server/build_spec/
 
+# superpowers tooling workspace
+.superpowers/
+
+# ChunkBiomesGUI GUI build output (nested build dir)
+ChunkBiomesGUI/ChunkBiomesGUI/
+
 docs/
