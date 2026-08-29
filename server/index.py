@@ -1,7 +1,6 @@
-"""SeedFinder HTTP Bridge — WSGI entrypoint (Vercel + CLI).
+"""SeedFinder HTTP Bridge — API server entrypoint.
 
-`app` is created at import time, which is what Vercel's serverless
-runtimes call. Running the file directly starts a local dev server.
+Running the file directly starts a local dev server.
 """
 
 import argparse

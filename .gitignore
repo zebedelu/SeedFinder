@@ -10,7 +10,7 @@ ChunkBiomesGUI/build_test/
 *.lib
 *.exe
 *.dll
-# *.so  (the Vercel library server/seedfinder_lib.so is tracked on purpose)
+*.so
 *.dylib
 *.gch
 *.pch

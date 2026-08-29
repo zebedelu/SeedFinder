@@ -77,7 +77,7 @@ def scan():
     if native.lib is None:
         return jsonify({
             "error": "SeedFinder native library (.so) not loaded on this server.",
-            "hint": "Check Vercel build logs for messages starting with [seedfinder].",
+            "hint": "Check the server startup logs for [seedfinder] messages.",
             "missing_or_invalid": missing,
             "results": [],
         }), 503

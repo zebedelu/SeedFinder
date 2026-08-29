@@ -1,4 +1,2 @@
 # Dependencies for building SeedFinder.exe (server/build_exe.py).
-# The Vercel runtime installs the server requirements.txt only — keep
-# build-only deps out of it.
 pyinstaller>=6.0

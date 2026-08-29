@@ -65,5 +65,5 @@ elif [ -f build_server/libseedfinder_lib.so ]; then
 else
     echo "ERROR: no .so found"; exit 1
 fi
-# Serve the same web pages as the Vercel deployment (server/index.py)
+# Serve the API server (server/index.py)
 exec "$PYTHON" server/index.py --lib-path "$SO_PATH"

@@ -2,12 +2,7 @@
 
 Given at least 4 structures with coordinates, cracks the Bedrock world seed
 by exhaustively validating candidate seeds (32-bit space, multi-threaded in
-the native library). Disabled on Vercel: the compute is too expensive to run
-on a serverless platform.
-
-Response is always a JSON *list*. Item 0 is the header
-{"status": "ok"|"partial"|"error"|"unavailable", ...}; the rest are
-{"seed", "score", "matches"} results.
+the native library).
 """
 
 import ctypes
@@ -15,7 +10,7 @@ import json
 import os
 import time
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, request
 
 from . import native
 
@@ -29,11 +24,6 @@ MAX_RESULTS_CAP = 2000
 DEFAULT_MAX_SECONDS = 30.0
 MAX_MAX_SECONDS = 120.0
 
-GITHUB_URL = "https://github.com/zebedelu/SeedFinder"
-DOWNLOAD_URL = f"{GITHUB_URL}/releases"
-
-# Type ids supported by the cracker (periodic region placement). Mineshaft (15)
-# has regionSize 1 and uses a per-chunk RNG - not crackable by region search.
 STRUCTURE_NAMES = {
     1: "Desert Pyramid", 2: "Jungle Temple", 3: "Swamp Hut", 4: "Igloo",
     5: "Village", 6: "Ocean Ruin", 7: "Shipwreck", 8: "Ocean Monument",
@@ -41,23 +31,6 @@ STRUCTURE_NAMES = {
     13: "Ancient City", 14: "Buried Treasure", 23: "Trail Ruins",
     24: "Trial Chambers",
 }
-
-UNAVAILABLE = [{
-    "status": "unavailable",
-    "message": ("SeedCracker is not available on Vercel at the moment. This "
-                "service is too expensive to keep running for free - please "
-                "donate or use the offline/local version."),
-    "download": DOWNLOAD_URL,
-    "docs": "/seedcracker/documentation",
-}]
-
-
-def is_vercel() -> bool:
-    return (
-        os.environ.get("VERCEL") == "1"
-        or "vercel.app" in os.environ.get("VERCEL_URL", "")
-        or "vercel.app" in (request.host or "")
-    )
 
 
 def _parse(post_data, args):
@@ -69,7 +42,6 @@ def _parse(post_data, args):
 
     raw = post_data  # JSON body or None
     if raw is None:
-        # GET query form: ?tolerance=6&units=blocks&structures=5,-280,152;8,696,360
         tolerance = int(args.get("tolerance", 6) or 6)
         units = args.get("units", "blocks") or "blocks"
         for k, cast in (("start", int), ("end", int), ("max", int),
@@ -85,7 +57,6 @@ def _parse(post_data, args):
                 structures.append({"type": int(parts[0]),
                                    "x": int(parts[1]), "z": int(parts[2])})
     elif isinstance(raw, list):
-        # standard list form: [ {options}, structure, structure, ... ]
         if not raw or not isinstance(raw[0], dict):
             raise ValueError("expected an options object as the first list item")
         head, tail = raw[0], raw[1:]
@@ -179,14 +150,6 @@ def _run(structures, tolerance, units, opts):
 
 @seedcracker_bp.route("/seedcracker", methods=["GET", "POST"])
 def seedcracker():
-    # The same path serves the HTML console (plain GET) and the API (any
-    # request that carries structures). A GET with the structures param is
-    # the API's query-string form; a bare GET renders the page.
-    if request.method == "GET" and not request.args.get("structures"):
-        return render_template("seedcracker.html", active="seedcracker",
-                               is_vercel=is_vercel(), download_url=DOWNLOAD_URL)
-    if is_vercel():
-        return jsonify(UNAVAILABLE)
     try:
         post_data = request.get_json(silent=True) if request.method == "POST" else None
         tolerance, units, structures, opts = _parse(post_data, request.args)

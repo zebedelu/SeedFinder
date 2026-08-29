@@ -43,10 +43,9 @@ def _bind(handle) -> None:
     handle.seedfinder_free_result.restype = None
     handle.seedfinder_status.argtypes = []
     handle.seedfinder_status.restype = ctypes.c_char_p
-    # seedfinder_crack is absent from .so builds predating SeedCrackerX (e.g.
-    # the stale lib shipped to Vercel). /seedcracker already gates availability
-    # by environment, so a lib without the symbol is a valid state - bind only
-    # when present or the whole app dies at import.
+    # seedfinder_crack is absent from .so builds predating SeedCrackerX. A lib
+    # without the symbol is a valid state - bind only when present or the whole
+    # app dies at import.
     if hasattr(handle, "seedfinder_crack"):
         handle.seedfinder_crack.argtypes = _CRACK_ARGTYPES
         # c_void_p keeps the raw malloc'd pointer; freed via seedfinder_free_result.
@@ -55,13 +54,11 @@ def _bind(handle) -> None:
 
 def _candidates() -> list[str]:
     """Possible native library locations, most likely first."""
-    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # server/
-    root = os.path.dirname(base)  # project root
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     meipass = [sys._MEIPASS] if getattr(sys, "frozen", False) else []
     return [
         *[os.path.join(m, n) for m in meipass
           for n in ("seedfinder_lib.dll", "seedfinder_lib.so")],
-        os.path.join(base, "seedfinder_lib.so"),
         os.path.join(root, "build_server", "seedfinder_lib.dll"),
         os.path.join(root, "build_server", "seedfinder_lib.so"),
         os.path.join(root, "build_server", "libseedfinder_lib.so"),
