@@ -56,7 +56,7 @@ Target platform is Minecraft Bedrock Edition, 1.18 through the latest release. M
 
 - **Native scan engine.** The actual search runs in compiled C against cubiomes, not Lua or Python, so it stays fast even at large radii - see [Benchmarks](#benchmarks) for real numbers.
 - **Plain REST API.** One `GET /scan` endpoint, query-string parameters in, JSON out. No SDK, no auth.
-- **A free hosted instance.** `https://mineseedfinder.vercel.app` is live right now - you can call it without building or running anything yourself.
+- **Official site.** The app is live at `https://mineseedfinder.vercel.app` - a free hosted instance you can call without building or running anything yourself.
 - **In-game overlay for Flarial Client**, results sorted by distance, rendered with ImGui.
 - **15 working structure types** - villages, temples, ocean structures, ancient cities, mansions, portals, and more. Full list [below](#supported-structures).
 - **Multi-type queries** - ask for several structures in one request (`types=5,8,9`) instead of one call per type.
@@ -148,7 +148,7 @@ Flarial Lua Script  --HTTP-->  Flask server  --ctypes-->  seedfinder_lib (.so / 
 ```
 
 1. **C core** (`core/`) - `seedfinder_wrapper.c` links cubiomes statically and implements `seedfinder_scan()`. For each requested structure type it walks the relevant grid regions around the player within `radius`, checks biome viability, computes distance, sorts, caps at `max`, and returns a hand-built JSON string across the ABI boundary (freed afterward with `seedfinder_free_result`).
-2. **HTTP server** (`server/`) - a single Flask app package (`server/app/`) loads that shared library and exposes `/status` and `/scan`. One codebase serves every deployment: `server/index.py` is the WSGI entry (Vercel root directory is `server/`), the same file runs locally on Windows and Linux via `server/start.bat` / `server/start.sh`, and it's what gets frozen into `SeedFinder.exe` by `server/build_exe.py`.
+2. **HTTP server** (`server/`) - a single Flask app package (`server/app/`) loads that shared library and exposes `/status` and `/scan`. One codebase serves every deployment: `server/index.py` is the WSGI entry, the same file runs locally on Windows and Linux via `server/start.bat` / `server/start.sh`, and it's what gets frozen into `SeedFinder.exe` by `server/build_exe.py`.
 3. **Flarial script** (`script/SeedFinder.lua`) - polls `/status`, calls `/scan` with the player's live coordinates, and draws the results in an ImGui panel with a name-to-icon lookup. A second, structurally identical module, `script/WHSeedFinder.lua`, points at the hosted API (https://mineseedfinder.vercel.app) instead of the local server.
 
 There's also an experimental fourth path in `core/SeedFinderBridge.cpp` / `.h`: a direct Lua↔C bridge meant to be compiled straight into the Flarial Client DLL, cutting out the HTTP hop entirely. It's set up in `CMakeLists.txt` but the shipped Lua script doesn't use it yet - see [Roadmap](#roadmap).
@@ -211,7 +211,7 @@ Error responses:
 // 400 - bad value, e.g. seed=abc
 { "error": "Invalid parameter: invalid literal for int() with base 10: 'abc'" }
 
-// 503 - native library failed to load (Vercel only, if the build didn't ship the .so)
+// 503 - native library failed to load (hosted only, if the build didn't ship the .so)
 { "error": "SeedFinder native library (.so) not loaded on this server.", "results": [] }
 ```
 
@@ -232,7 +232,7 @@ Every SeedFinder deployment can also crack a seed back from structures. Paramete
 | `max` | int | `500` | Max results kept (best by score). |
 | `max_seconds` | float | `30` | Time budget; partial results when it expires. |
 
-Response is a JSON list — header then `{"seed", "score", "matches"}` per candidate. Only the local API serves it; Vercel returns `"unavailable"`. See [SeedCrackerX (reverse seed search)](#seedcrackerx-reverse-seed-search) and [SeedCrackerX documentation](https://mineseedfinder.vercel.app/seedcracker/documentation).
+Response is a JSON list — header then `{"seed", "score", "matches"}` per candidate. Only the local API serves it; the hosted site returns `"unavailable"`. See [SeedCrackerX (reverse seed search)](#seedcrackerx-reverse-seed-search) and [SeedCrackerX documentation](https://mineseedfinder.vercel.app/seedcracker/documentation).
 
 ## Supported structures
 
@@ -277,10 +277,6 @@ server/start.sh
 ```
 
 Both scripts build `seedfinder_lib` via CMake into `build_server/`, then start the Flask server on port `7890`.
-
-**Build the Linux `.so` for Vercel (GitHub Actions)** — no VM needed:
-
-The `seedfinder_lib.so` that ships with the hosted instance (`server/seedfinder_lib.so`) is compiled by the **`build-lib`** workflow. It's **manual only**: open **Actions → build-lib → Run workflow** (never runs on a plain push). The workflow builds `core/` on Ubuntu, runs a smoke test (import, `seedfinder_crack` symbol, all pages + `/scan`), and uploads the library as the `seedfinder-lib` artifact. Download it, replace the tracked `server/seedfinder_lib.so`, commit, and Vercel auto-deploys.
 
 **Package into a Windows `.exe`**:
 
