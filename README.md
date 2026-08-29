@@ -292,10 +292,13 @@ REM Output: server\dist\SeedFinder.exe
 
 I ran these myself against the real compiled engine, not estimated:
 
-- Binary tested: `build_server/seedfinder_lib.so`, built from this repo's own source, served through `server/index.py` (Flask's built-in dev server, same as the project ships - no custom harness).
 - Timed with `curl -w "%{time_total}"` against `localhost`, so this is engine + Flask overhead, network latency excluded.
 - 5 requests per scenario, average shown. There's no caching in the code, so every request does a full scan.
-- Environment: single-vCPU Intel Xeon @ 2.10 GHz container, Ubuntu 24.04.4, Python 3.12.3, Flask 3.1.3, measured July 4, 2026. That's a modest single core - expect quicker results on a real desktop. The server is also single-threaded by default (Flask's dev server), so it won't spread a scan across multiple cores regardless of what's available.
+
+### v1.0.0 (measured July 4, 2026)
+
+- Binary tested: `build_server/seedfinder_lib.so`, built from this repo's own source, served through `server/index.py` (Flask's built-in dev server, same as the project ships - no custom harness).
+- Environment: single-vCPU Intel Xeon @ 2.10 GHz container, Ubuntu 24.04.4, Python 3.12.3, Flask 3.1.3. That's a modest single core - expect quicker results on a real desktop. The server is also single-threaded by default (Flask's dev server), so it won't spread a scan across multiple cores regardless of what's available.
 
 | Scenario | Radius | Types | Results | Avg. time |
 |---|---:|---|---:|---:|
@@ -305,7 +308,21 @@ I ran these myself against the real compiled engine, not estimated:
 | Village + Monument + Mansion | 300 | `5,8,9` | 50 (capped) | ~132.6 ms |
 | 5 types combined | 1000 | `5,14,13,9,10` | 1000 (capped) | ~3.72 s |
 
-The interesting part: cost tracks how often a structure's grid repeats, not just the radius. Buried Treasure has a small region spacing and gets checked almost every chunk pair, so radius 200 (152.6 ms) actually costs more than Ancient City at radius 500 (42.9 ms), since Ancient City's grid is much sparser. If you're polling this from something latency-sensitive - an in-game overlay, say - smaller radii and fewer combined types will feel a lot snappier than cranking both up.
+### v1.2.0 (measured August 29, 2026)
+
+Taken after the `faster seedcracker & seedfinder` engine optimization. This is a different machine than the v1.0.0 table above (Intel Core i3-1305U laptop, 6 threads, Windows 11, Python 3.14.7, Flask 3.1.3), so absolute times are **not** directly comparable between the two tables - which is exactly why the pre-optimization code (commit `7513824`) was rebuilt and re-measured on this same machine, under identical conditions (seed `8675309` from player position `0, 0`, one warm-up request per scenario before timing). That gives an apples-to-apples before/after for the engine change itself:
+
+| Scenario | Radius | Types | Results | Pre-optimization | v1.2.0 | Faster by |
+|---|---:|---|---:|---:|---:|---:|
+| Village | 100 | `5` | 1 | 15.9 ms | 10.6 ms | 33% |
+| Buried Treasure | 200 | `14` | 20 (capped) | 286.5 ms | 220.8 ms | 23% |
+| Ancient City | 500 | `13` | 20 (capped) | 84.7 ms | 68.9 ms | 19% |
+| Village + Monument + Mansion | 300 | `5,8,9` | 50 (capped) | 213.4 ms | 196.7 ms | 8% |
+| 5 types combined | 1000 | `5,14,13,9,10` | 1000 (capped) | 6.56 s | 4.86 s | 26% |
+
+Net: on identical hardware, the optimization shaves 8-33% off scan time, with the biggest absolute win on the heaviest scenario (the 5-type radius-1000 scan drops ~1.7 s).
+
+The interesting part: cost tracks how often a structure's grid repeats, not just the radius. Buried Treasure has a small region spacing and gets checked almost every chunk pair, so radius 200 actually costs more than Ancient City at radius 500, since Ancient City's grid is much sparser - both tables above show the same ~3x cost ratio. If you're polling this from something latency-sensitive - an in-game overlay, say - smaller radii and fewer combined types will feel a lot snappier than cranking both up.
 
 ## Why SeedFinder?
 
