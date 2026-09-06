@@ -76,6 +76,9 @@ CLAUDE.md
 server/dist/
 server/build_spec/
 
+# WASM intermediário (CMake via emcmake)
+wasm/build/
+
 # superpowers tooling workspace
 .superpowers/
 
@@ -83,3 +86,4 @@ server/build_spec/
 ChunkBiomesGUI/ChunkBiomesGUI/
 
 docs/
+wasm/

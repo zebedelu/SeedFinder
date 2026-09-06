@@ -616,6 +616,11 @@ SEEDFINDER_API char *seedfinder_crack(
     /* Strongest filter first. */
     qsort(targets, numTypes, sizeof(CrackTarget), crackTargetCompare);
 
+#if defined(__EMSCRIPTEN__)
+    /* Sem -pthread o pthread_create aborta em runtime; o JS paraleliza
+       via Web Workers (uma fatia [startSeed,endSeed) por worker). */
+    numThreads = 1;
+#endif
     if ((endSeed - startSeed) < (uint64_t)numThreads)
         numThreads = 1;
 
@@ -642,10 +647,14 @@ SEEDFINDER_API char *seedfinder_crack(
         w->worst = INT64_MAX;
         w->worstIdx = -1;
         w->checked = 0;
-        pids[i] = crackThreadCreate(crackWorker, w);
+        if (numThreads == 1)
+            crackWorker(w); /* inline: mesma partição, mesmo deadline, mesmo stop */
+        else
+            pids[i] = crackThreadCreate(crackWorker, w);
     }
-    for (int i = 0; i < numThreads; i++)
-        crackThreadJoin(pids[i]);
+    if (numThreads > 1)
+        for (int i = 0; i < numThreads; i++)
+            crackThreadJoin(pids[i]);
 
     int total = 0;
     for (int i = 0; i < numThreads; i++)

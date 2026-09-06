@@ -110,8 +110,10 @@ FORCE_INLINE HOT_FUNC void mSetSeed(MersenneTwister* const mt, const uint64_t se
     mt->twisted = 0;
 }
 
-// Generate the next random value
-FORCE_INLINE HOT_FUNC PURE_FUNC uint32_t _mNext(MersenneTwister* const mt) {
+// NOTE: no PURE_FUNC on these — they mutate *mt, so the "pure" attribute is a
+// lie; clang CSEs repeated same-pointer calls under -O1 and the RNG repeats
+// values (wasm divergence, draws=(2,2,2,2)). _mTemper keeps it (value-only).
+FORCE_INLINE HOT_FUNC uint32_t _mNext(MersenneTwister* const mt) {
     if (UNLIKELY(mt->index >= mt->twisted)) {
         if (mt->twisted < mt->limit && mt->limit < MT_SIZE) {
             // lazy: twist only the next word
@@ -133,7 +135,7 @@ FORCE_INLINE HOT_FUNC PURE_FUNC uint32_t _mNext(MersenneTwister* const mt) {
 }
 
 // Generate a random integer in [0, n)
-FORCE_INLINE HOT_FUNC PURE_FUNC int mNextInt(MersenneTwister* const mt, const int n) {
+FORCE_INLINE HOT_FUNC int mNextInt(MersenneTwister* const mt, const int n) {
     if (LIKELY((n & (n - 1)) == 0)) {
         // Fast path for power-of-2 n
         return _mNext(mt) & (n - 1);
@@ -142,22 +144,22 @@ FORCE_INLINE HOT_FUNC PURE_FUNC int mNextInt(MersenneTwister* const mt, const in
 }
 
 // Generate an unbounded random integer
-FORCE_INLINE HOT_FUNC PURE_FUNC int mNextIntUnbound(MersenneTwister* const mt) {
+FORCE_INLINE HOT_FUNC int mNextIntUnbound(MersenneTwister* const mt) {
     return _mNext(mt) >> 1;
 }
 
 // Generate a random double in [0.0, 1.0)
-FORCE_INLINE HOT_FUNC PURE_FUNC double mNextDouble(MersenneTwister* const mt) {
+FORCE_INLINE HOT_FUNC double mNextDouble(MersenneTwister* const mt) {
     return _mNext(mt) * (1.0 / 4294967296.0);
 }
 
 // Generate a random float in [0.0f, 1.0f)
-FORCE_INLINE HOT_FUNC PURE_FUNC float mNextFloat(MersenneTwister* const mt) {
+FORCE_INLINE HOT_FUNC float mNextFloat(MersenneTwister* const mt) {
     return _mNext(mt) * (1.0f / 4294967296.0f);
 }
 
 // Generate a random boolean value
-FORCE_INLINE HOT_FUNC PURE_FUNC bool mNextBool(MersenneTwister* const mt) {
+FORCE_INLINE HOT_FUNC bool mNextBool(MersenneTwister* const mt) {
     return _mNext(mt) & 1;
 }
 
