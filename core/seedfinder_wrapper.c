@@ -53,6 +53,23 @@ static int compareByDistance(const void *a, const void *b)
     return 0;
 }
 
+/* Bedrock checks the biome at the structure's OWN position cell; the upstream
+ * Java-style gate samples an offset door corner and passes positions sitting
+ * on swamp/river/etc. Shared by /scan and the crack result filter. */
+static int structureIsViable(int structureType, Generator *g, int x, int z)
+{
+    if (!isViableBedrockStructurePos(structureType, g, x, z, 0))
+        return 0;
+    if (structureType == Outpost) {
+        int cellX = (x >> 4) * 4 + 2;
+        int cellZ = (z >> 4) * 4 + 2;
+        int bio = getBiomeAt(g, 0, cellX, 319 >> 2, cellZ);
+        if (bio < 0 || !isViableFeatureBiome(MC_NEWEST, Outpost, bio))
+            return 0;
+    }
+    return 1;
+}
+
 SEEDFINDER_API const char *seedfinder_status(void)
 {
     return "{\"status\": \"ok\"}";
@@ -98,19 +115,8 @@ SEEDFINDER_API char *seedfinder_scan(
                     continue;
 
                 /* Biome viability check */
-                if (!isViableBedrockStructurePos(structType, &g, pos.x, pos.z, 0))
+                if (!structureIsViable(structType, &g, pos.x, pos.z))
                     continue;
-
-                /* Bedrock checks the biome at the structure's OWN position cell;
-                   the upstream Java-style gate samples an offset door corner and
-                   passes positions sitting on swamp/river/etc. */
-                if (structType == Outpost) {
-                    int cellX = (pos.x >> 4) * 4 + 2;
-                    int cellZ = (pos.z >> 4) * 4 + 2;
-                    int bio = getBiomeAt(&g, 0, cellX, 319 >> 2, cellZ);
-                    if (bio < 0 || !isViableFeatureBiome(MC_NEWEST, Outpost, bio))
-                        continue;
-                }
 
                 int dx = pos.x / 16 - playerChunkX;
                 int dz = pos.z / 16 - playerChunkZ;
@@ -680,21 +686,29 @@ SEEDFINDER_API char *seedfinder_crack(
     for (int i = 0; i < numThreads; i++)
         checked += workers[i].checked;
 
-    /* Serialize: recompute per-structure match chunk for each winner. */
-    size_t cap = 64 + (size_t)c * 128 + 64;
-    char *buf = malloc(cap);
-    int off = sprintf(buf, "{\"results\":[");
+    /* Serialize: recompute per-structure match chunk for each winner. Only
+     * seeds whose matches are biome-viable are kept — a match the RNG would
+     * place but the game never generates (wrong biome) is a false positive
+     * (e.g. seed 254568). Score is recomputed from the viable matches. */
+    Generator g;
+    setupGenerator(&g, MC_NEWEST, 0);
+
+    int *m = malloc(((size_t)c > 0 ? (size_t)c : 1) * (size_t)numTypes * 2 * sizeof(int));
+    int kept = 0;
     for (int i = 0; i < c; i++) {
-        off += sprintf(buf + off, "%s{\"seed\":%llu,\"score\":%lld,\"matches\":[",
-                       i ? "," : "", (unsigned long long)all[i].seed,
-                       (long long)all[i].score);
-        for (int k = 0; k < numTypes; k++) {
+        applySeed(&g, DIM_OVERWORLD, all[i].seed);
+        int64_t viableScore = 0;
+        int valid = 1;
+        int *mm = m + (size_t)kept * (size_t)numTypes * 2;
+        for (int k = 0; k < numTypes && valid; k++) {
             const CrackTarget *t = &orig[k];
             int bx = 0, bz = 0, bd = INT32_MAX;
             for (int r = 0; r < t->numRegions; r++) {
                 Pos pos;
                 if (!getBedrockStructurePos(t->type, MC_NEWEST, all[i].seed,
                                             t->regX[r], t->regZ[r], &pos))
+                    continue;
+                if (!structureIsViable(t->type, &g, pos.x, pos.z))
                     continue;
                 int cx = (pos.x - 8) >> 4;
                 int cz = (pos.z - 8) >> 4;
@@ -703,7 +717,47 @@ SEEDFINDER_API char *seedfinder_crack(
                 int d2 = dx * dx + dz * dz;
                 if (d2 < bd) { bd = d2; bx = cx; bz = cz; }
             }
-            off += sprintf(buf + off, "%s[%d,%d]", k ? "," : "", bx, bz);
+            if (bd == INT32_MAX || bd > t->maxD2) { valid = 0; break; }
+            mm[k * 2] = bx; mm[k * 2 + 1] = bz;
+            viableScore += bd;
+        }
+        if (!valid)
+            continue;
+        all[kept].seed = all[i].seed;
+        all[kept].score = viableScore;
+        kept++;
+    }
+    c = kept;
+
+    /* Re-rank survivors by their recomputed (viable) score. */
+    for (int i = 1; i < c; i++) {
+        CrackHit key = all[i];
+        int kmrow[CRACK_MAX_STRUCTURES * 2];
+        const int *src = m + (size_t)i * (size_t)numTypes * 2;
+        for (int k = 0; k < numTypes * 2; k++) kmrow[k] = src[k];
+        int j = i - 1;
+        while (j >= 0 && all[j].score > key.score) {
+            all[j + 1] = all[j];
+            for (int k = 0; k < numTypes * 2; k++)
+                m[(size_t)(j + 1) * numTypes * 2 + k] = m[(size_t)j * numTypes * 2 + k];
+            j--;
+        }
+        all[j + 1] = key;
+        for (int k = 0; k < numTypes * 2; k++)
+            m[(size_t)(j + 1) * numTypes * 2 + k] = kmrow[k];
+    }
+
+    size_t cap = 64 + (size_t)c * ((size_t)numTypes * 32 + 80) + 64;
+    char *buf = malloc(cap);
+    int off = sprintf(buf, "{\"results\":[");
+    for (int i = 0; i < c; i++) {
+        off += sprintf(buf + off, "%s{\"seed\":%llu,\"score\":%lld,\"matches\":[",
+                       i ? "," : "", (unsigned long long)all[i].seed,
+                       (long long)all[i].score);
+        const int *mm = m + (size_t)i * (size_t)numTypes * 2;
+        for (int k = 0; k < numTypes; k++) {
+            off += sprintf(buf + off, "%s[%d,%d]", k ? "," : "",
+                           mm[k * 2], mm[k * 2 + 1]);
         }
         off += sprintf(buf + off, "]}");
     }
@@ -712,6 +766,7 @@ SEEDFINDER_API char *seedfinder_crack(
                    (unsigned long long)checked,
                    stop ? "true" : "false", numThreads);
 
+    free(m);
     free(pids); free(workers); free(hits); free(all);
     return buf;
 }
