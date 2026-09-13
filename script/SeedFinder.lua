@@ -14,7 +14,19 @@ author = "zebedelu"
 local SERVER_URL = "http://127.0.0.1:7890"
 local serverOnline = false
 local serverWarned = false
+local rateLimited = false
+local rateLimitedWarned = false
 local lastServerCheck = 0
+
+-- Detect HTTP 429 (Vercel firewall rate limit). network.get only returns the
+-- body, so we look for the markers Vercel/CF put in rate-limit responses.
+local function isRateLimited(response)
+	if not response or type(response) ~= "string" then return false end
+	local lower = response:lower()
+	return lower:find("429") ~= nil
+		or lower:find("too many requests") ~= nil
+		or lower:find("rate limit") ~= nil
+end
 
 local function checkServer()
 	local now = os.clock()
@@ -25,6 +37,10 @@ local function checkServer()
 	if ok and response and type(response) == "string" and response ~= "" and response ~= "null" then
 		if response:find('"ok"') or response:find('"status"') then
 			serverOnline = true
+			serverWarned = false
+		elseif isRateLimited(response) then
+			serverOnline = true
+			rateLimited = true
 			serverWarned = false
 		else
 			serverOnline = false
@@ -338,11 +354,32 @@ local function onTick()
 	local ok, response = pcall(network.get, scanUrl)
 
 	if ok and response and type(response) == "string" and response ~= "" and response ~= "null" then
-		scanResults = parseScanResponse(response)
-		serverOnline = true
-		serverWarned = false
-		if getBool(notifyToggle, true) then
-			client.notify(string.format("Scan complete! %d structures found", #scanResults))
+		local parsed = parseScanResponse(response)
+		if #parsed > 0 or response:find('"results"') then
+			scanResults = parsed
+			rateLimited = false
+			rateLimitedWarned = false
+			serverOnline = true
+			serverWarned = false
+			if getBool(notifyToggle, true) then
+				client.notify(string.format("Scan complete! %d structures found", #scanResults))
+			end
+		elseif isRateLimited(response) then
+			rateLimited = true
+			serverOnline = true
+			serverWarned = false
+			if not rateLimitedWarned then
+				rateLimitedWarned = true
+				log("SeedFinder: Rate limited (60 requests/min). Keeping previously scanned structures.")
+				client.notify("SeedFinder: Rate limited! Max 60 requests per minute. Keeping previous results.")
+			end
+		else
+			if not serverWarned then
+				serverWarned = true
+				log("SeedFinder: Failed to reach server at " .. SERVER_URL)
+			end
+			serverOnline = false
+			rateLimited = false
 		end
 	else
 		if not serverWarned then
@@ -350,6 +387,7 @@ local function onTick()
 			log("SeedFinder: Failed to reach server at " .. SERVER_URL)
 		end
 		serverOnline = false
+		rateLimited = false
 	end
 
 	needsRescan = false
@@ -364,19 +402,23 @@ local function onRender()
 	local px, py, pz = player.position()
 	if not px then return end
 
-	ImGui.SetNextWindowSize({350, 300}, 4)
+	ImGui.SetNextWindowSize({350, 360}, 4)
 	ImGui.SetNextWindowBgAlpha(0.6)
 	ImGui.Begin("SeedFinder")
 
-	if not serverOnline then
+	if rateLimited then
+		ImGui.Text("Rate limited! Max 60 requests/min.")
+		ImGui.Text("API: " .. SERVER_URL)
+		ImGui.Text("Keeping previously scanned structures.")
+	elseif not serverOnline then
 		ImGui.Text("Server offline!")
 		ImGui.Text("URL: " .. SERVER_URL)
 	elseif not currentSeed then
 		ImGui.Text("Enter a seed in settings to begin")
-	elseif #scanResults == 0 then
-		ImGui.Text("No structures found nearby")
-		ImGui.Text(string.format("Seed: %.0f | Radius: %d chunks", currentSeed, math.floor(getNum(radiusSlider, 10))))
-	else
+	end
+
+	-- Always keep previously scanned structures on screen
+	if currentSeed and #scanResults > 0 then
 		ImGui.Text(string.format("Nearby Structures (%d)", #scanResults))
 		ImGui.Text("--------------------------------")
 		for i, result in ipairs(scanResults) do
@@ -389,7 +431,16 @@ local function onRender()
 				icon, displayName, result.x, result.z, distStr
 			))
 		end
+	elseif currentSeed and not rateLimited and serverOnline then
+		ImGui.Text("No structures found nearby")
+		ImGui.Text(string.format("Seed: %.0f | Radius: %d chunks", currentSeed, math.floor(getNum(radiusSlider, 10))))
 	end
+
+	ImGui.Text("--------------------------------")
+	ImGui.Text("Max 60 requests per minute.")
+	ImGui.Text("Check mineseedfinder.vercel.app for possible updates! 😊")
+	ImGui.Text("If you really like this project, give a star on our GitHub!")
+	ImGui.Text("https://github.com/zebedelu/SeedFinder")
 
 	ImGui.End()
 end
