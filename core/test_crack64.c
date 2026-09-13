@@ -6,8 +6,10 @@
 #include "crack64.h"
 #include "ChunkBiomesGUI/cubiomes/finders.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <assert.h>
 
-int main(void) {
+static int testParity(void) {
     // Paridade: javaChunk(cfg, seed & M48) deve dar o MESMO chunk que
     // getStructurePos retorna para a seed completa.
     const int TYPES[] = {23, 24};
@@ -33,4 +35,44 @@ int main(void) {
     }
     printf("PARITY_OK\n");
     return 0;
+}
+
+// --- sweep48 test ---
+static Anchor48 mkAnchors(uint64_t fullSeed, long long tol) {
+    // Gera âncoras autoconsistentes: posiciona 3 Trial Chambers via cubiomes
+    // a partir da seed fixture e usa as próprias coords como alvo.
+    Anchor48 a; a.nJava = 0; a.maxD2 = (int)(tol * tol);
+    const int T = Trial_Chambers;
+    const long long CHUNKS[][2] = {{0,0},{3,-2},{-4,1}};
+    for (int i = 0; i < 3; i++) {
+        int rx = (int)CHUNKS[i][0], rz = (int)CHUNKS[i][1];
+        Pos p;
+        if (!getStructurePos(T, MC_NEWEST, fullSeed, rx, rz, &p)) continue;
+        int j = a.nJava++;
+        javaCfgFor(T, &a.cfg[j]);
+        long long cx = (p.x - 8) >> 4, cz = (p.z - 8) >> 4;
+        a.chunkX[j] = cx; a.chunkZ[j] = cz;
+        // regiões candidatas exatas: a região que gerou este chunk
+        a.nRegions[j] = 1; a.regX[j][0] = rx; a.regZ[j][0] = rz;
+    }
+    return a;
+}
+
+static int testSweep(void) {
+    uint64_t full = 7777777777777777777ULL;
+    Anchor48 a = mkAnchors(full, 0);
+    U64Vec out = {0}; int timedOut = 0;
+    sweep48(&a, (full & C64_M48) - 1000, (full & C64_M48) + 1000, 0.0, &out, &timedOut);
+    int found = 0;
+    for (int i = 0; i < out.n; i++) if (out.v[i] == (full & C64_M48)) found = 1;
+    assert(found && "sweep48 nao recuperou a seed fixture");
+    assert(!timedOut);
+    free(out.v);
+    printf("SWEEP_OK\n");
+    return 0;
+}
+
+int main(void) {
+    if (testParity()) return 1;
+    return testSweep();
 }

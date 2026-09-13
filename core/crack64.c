@@ -1,5 +1,8 @@
-// core/crack64.c (Task 3 — só o fast-path)
+// core/crack64.c (Task 3 fast-path + Task 4 sweep48)
 #include "crack64.h"
+#include <stdlib.h>
+#include <assert.h>
+#include "platform_threads.h" // (Task 2) — usado na Task 5; ja incluido aqui sem custo
 
 int javaCfgFor(int structureType, JavaCfg *out) {
     StructureConfig sconf;
@@ -26,8 +29,81 @@ void javaChunk(const JavaCfg *c, uint64_t s48, int regX, int regZ,
     int oz = (int)((st >> 17) % (uint32_t)c->chunkRange);
     // getStructurePos devolve o bloco NO CANTO do chunk: (reg*RS + o) << 4
     // (finders.h:790, sem o +8 de centroide). O crack engine extrai o chunk
-    // anchor como (blockX - 8) >> 4 (seedfinder_wrapper.c:235). Reproduzir a
-    // mesma extracao para que javaChunk seja comparavel 1:1 com o oraculo.
-    *chunkX = ((((long long)regX * c->regionSize + ox) << 4) - 8) >> 4;
-    *chunkZ = ((((long long)regZ * c->regionSize + oz) << 4) - 8) >> 4;
+    // anchor como (blockX - 8) >> 4 (seedfinder_wrapper.c:235). Como o bloco
+    // e' multiplo exato de 16, ((a*16) - 8) >> 4 == a - 1 para todo inteiro
+    // ( ate' negativos), logo o chunk anchor sai direto sem o round-trip
+    // de shift (evita shift assinado e acelera o hot loop do sweep).
+    *chunkX = (long long)regX * c->regionSize + ox - 1;
+    *chunkZ = (long long)regZ * c->regionSize + oz - 1;
+}
+
+static void u64Push(U64Vec *v, uint64_t x) {
+    assert(v->n <= v->cap); // invariante do vetor (n<cap => ha' folga; n==cap => cresce)
+    if (v->n == v->cap) {
+        int newCap = v->cap ? v->cap * 2 : 256;
+        uint64_t *nv = realloc(v->v, (size_t)newCap * sizeof(uint64_t));
+        // Cinto de seguranca: se realloc falhar, nao perder o buffer antigo nem
+        // escrever em NULL. Nao-liberar na falha deixa vazamento intencional —
+        // melhor que corromper (o chamador so acumula candidatos; janela gigante
+        // e' evitada pelos clamps do caller, Task 5).
+        assert(nv && "u64Push: realloc falhou");
+        if (!nv) return;
+        v->v = nv;
+        v->cap = newCap;
+    }
+    v->v[v->n++] = x;
+}
+
+int anchor48Build(Anchor48 *a, const int *types, const double *xb, const double *zb,
+                  int n, int tolerance) {
+    if (n < 1 || n > C64_MAX) return -1;
+    a->nJava = 0;
+    a->maxD2 = tolerance * tolerance;
+    for (int i = 0; i < n; i++) {
+        JavaCfg c;
+        if (!javaCfgFor(types[i], &c)) return -1; // chamador valida antes; cinto de seguranca
+        long long cx = (xb[i] >= 0) ? (long long)xb[i] / 16 : ((long long)xb[i] - 15) / 16;
+        long long cz = (zb[i] >= 0) ? (long long)zb[i] / 16 : ((long long)zb[i] - 15) / 16;
+        int j = a->nJava++;
+        a->cfg[j] = c; a->chunkX[j] = cx; a->chunkZ[j] = cz;
+        // celulas candidatas: mesma formula de regiao do seedfinder_crack (floor-div)
+        int rs = c.regionSize;
+        long long lox = (cx - tolerance - (rs - 1)) / rs;
+        long long hix = (cx + tolerance >= 0) ? (cx + tolerance) / rs
+                                              : (cx + tolerance - (rs - 1)) / rs;
+        long long loz = (cz - tolerance - (rs - 1)) / rs;
+        long long hiz = (cz + tolerance >= 0) ? (cz + tolerance) / rs
+                                              : (cz + tolerance - (rs - 1)) / rs;
+        int k = 0;
+        for (long long x = lox; x <= hix && k < 64; x++)
+            for (long long z = loz; z <= hiz && k < 64; z++)
+                { a->regX[j][k] = (int)x; a->regZ[j][k] = (int)z; k++; }
+        if (k == 0) return -1;
+        a->nRegions[j] = k;
+    }
+    return 0;
+}
+
+// 1 se a ancora j tem alguma regiao cujo placement cai dentro de maxD2 do alvo
+static inline int anchorHit(const Anchor48 *a, int j, uint64_t s48) {
+    for (int r = 0; r < a->nRegions[j]; r++) {
+        long long cx, cz;
+        javaChunk(&a->cfg[j], s48, a->regX[j][r], a->regZ[j][r], &cx, &cz);
+        long long dx = cx - a->chunkX[j], dz = cz - a->chunkZ[j];
+        if (dx * dx + dz * dz <= (long long)a->maxD2) return 1;
+    }
+    return 0;
+}
+
+void sweep48(const Anchor48 *a, uint64_t s48Start, uint64_t s48End,
+             double deadlineMs, U64Vec *out, int *timedOut) {
+    *timedOut = 0; out->n = 0;
+    for (uint64_t s = s48Start; s < s48End; s++) {
+        int ok = 1;
+        for (int j = 0; j < a->nJava && ok; j++) ok = anchorHit(a, j, s);
+        if (ok) u64Push(out, s);
+        if ((s & 0xFFFFULL) == 0 && deadlineMs > 0.0 && nowms_s() > deadlineMs) {
+            *timedOut = 1; return;
+        }
+    }
 }
