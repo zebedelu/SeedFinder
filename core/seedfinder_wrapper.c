@@ -181,44 +181,7 @@ SEEDFINDER_API void seedfinder_free_result(char *result)
 
 /* ============================ SeedCracker ============================ */
 
-/* Portable thread handle: Win32 threads on Windows (keeps the DLL
- * self-contained on MinGW), pthreads elsewhere. */
-#ifdef _WIN32
-#include <windows.h>
-typedef HANDLE CrackThread;
-static CrackThread crackThreadCreate(void *(*fn)(void *), void *arg)
-{
-    return CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)fn, arg, 0, NULL);
-}
-static void crackThreadJoin(CrackThread t)
-{
-    WaitForSingleObject(t, INFINITE);
-    CloseHandle(t);
-}
-#else
-#include <pthread.h>
-typedef pthread_t CrackThread;
-static CrackThread crackThreadCreate(void *(*fn)(void *), void *arg)
-{
-    pthread_t t;
-    pthread_create(&t, NULL, fn, arg);
-    return t;
-}
-static void crackThreadJoin(CrackThread t) { pthread_join(t, NULL); }
-#endif
-
-/* Monotonic clock in milliseconds (cubiomes has no portable time helper). */
-#ifdef _WIN32
-static inline double nowms_s(void) { return (double)GetTickCount64(); }
-#else
-#include <time.h>
-static inline double nowms_s(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
-}
-#endif
+#include "platform_threads.h"
 
 #define CRACK_MAX_STRUCTURES 24
 #define CRACK_MAX_REGIONS 64
