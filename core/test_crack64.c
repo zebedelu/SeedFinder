@@ -61,6 +61,7 @@ static Anchor48 mkAnchors(uint64_t fullSeed, long long tol) {
 static int testSweep(void) {
     uint64_t full = 7777777777777777777ULL;
     Anchor48 a = mkAnchors(full, 0);
+    assert(a.nJava >= 2 && "fixture precisa de multiplas ancoras (esperado 3)");
     U64Vec out = {0}; int timedOut = 0;
     sweep48(&a, (full & C64_M48) - 1000, (full & C64_M48) + 1000, 0.0, &out, &timedOut);
     int found = 0;
@@ -72,7 +73,56 @@ static int testSweep(void) {
     return 0;
 }
 
+static int cmpu64(const void *a, const void *b) {
+    uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+    return (x > y) - (x < y);
+}
+
+// Range de 2^24 s48s contem a fixture; 4 threads; budget folgado.
+#define MT_LO (7777777777777777777ULL & C64_M48) - (1ULL << 23)
+#define MT_LEN (1ULL << 24)
+
+static int testSweepMT(void) {
+    uint64_t full = 7777777777777777777ULL;
+    Anchor48 a = mkAnchors(full, 0);
+    assert(a.nJava >= 2 && "fixture precisa de multiplas ancoras (esperado 3)");
+    uint64_t s48 = full & C64_M48;
+    U64Vec out = {0};
+    Sweep48Result r = sweep48MT(&a, MT_LO, MT_LO + MT_LEN, 120.0, 4, &out);
+    int found = 0;
+    for (int i = 0; i < out.n; i++) if (out.v[i] == s48) found = 1;
+    assert(found); assert(!r.timedOut); assert(r.threads == 4); assert(r.checked > 0);
+    // Cobertura exata: uniao das fatias == [start,end), sem sobreposicao.
+    assert(r.checked == MT_LEN);
+    // Paridade com o sweep single-thread no mesmo range (mesmo conjunto de hits).
+    U64Vec st = {0}; int to = 0;
+    sweep48(&a, MT_LO, MT_LO + MT_LEN, 0.0, &st, &to);
+    assert(!to && st.n == out.n);
+    qsort(st.v, (size_t)st.n, sizeof(uint64_t), cmpu64);
+    qsort(out.v, (size_t)out.n, sizeof(uint64_t), cmpu64);
+    for (int i = 0; i < st.n; i++) assert(st.v[i] == out.v[i]);
+    free(st.v); free(out.v);
+    printf("SWEEP_MT_OK\n");
+    return 0;
+}
+
+static int testSweepMTTimeout(void) {
+    uint64_t full = 7777777777777777777ULL;
+    Anchor48 a = mkAnchors(full, 0);
+    U64Vec out = {0};
+    // Range gigantesco (2^40) com budget de 0.5 s => deadline compartilhado deve
+    // parar todos os workers (timedOut via stop, mesmo que um worker termine a
+    // propria fatia antes).
+    Sweep48Result r = sweep48MT(&a, MT_LO, MT_LO + (1ULL << 40), 0.5, 4, &out);
+    assert(r.timedOut); assert(r.checked < (1ULL << 40));
+    free(out.v);
+    printf("SWEEP_MT_TIMEOUT_OK\n");
+    return 0;
+}
+
 int main(void) {
     if (testParity()) return 1;
-    return testSweep();
+    if (testSweep()) return 1;
+    if (testSweepMT()) return 1;
+    return testSweepMTTimeout();
 }

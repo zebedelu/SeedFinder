@@ -30,4 +30,11 @@ int  anchor48Build(Anchor48 *a, const int *types, const double *xb, const double
                    int n, int tolerance);             // 0 ok / -1 erro
 void sweep48(const Anchor48 *a, uint64_t s48Start, uint64_t s48End,
              double deadlineMs, U64Vec *out, int *timedOut);
+
+typedef struct { uint64_t checked; int timedOut, threads; } Sweep48Result;
+
+// Igual a sweep48 mas particionando [start,end) em numThreads workers, cada
+// um com vetor proprio (merge pos-join). budgetSec <= 0 => sem deadline.
+Sweep48Result sweep48MT(const Anchor48 *a, uint64_t start, uint64_t end,
+                        double budgetSec, int numThreads, U64Vec *out);
 #endif

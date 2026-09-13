@@ -107,3 +107,66 @@ void sweep48(const Anchor48 *a, uint64_t s48Start, uint64_t s48End,
         }
     }
 }
+
+// --- sweep48 multi-thread (Task 5) -------------------------------------
+// Mesmo padrao de seedfinder_crack (seedfinder_wrapper.c): stop volatil
+// compartilhado + deadline absoluto em ms (0.0 = sem deadline); cada worker
+// tem U64Vec proprio, mergeado so' depois do join (sem locks, sem races).
+
+typedef struct {
+    const Anchor48 *a; uint64_t start, end; double deadline;
+    volatile int *stop; U64Vec out; uint64_t checked;
+} SweepWorker;
+
+static void *sweep48Worker(void *arg) {
+    SweepWorker *w = (SweepWorker *)arg;
+    for (uint64_t s = w->start; s < w->end && !*w->stop; s++) {
+        int ok = 1;
+        for (int j = 0; j < w->a->nJava && ok; j++) ok = anchorHit(w->a, j, s);
+        if (ok) u64Push(&w->out, s);
+        w->checked++;
+        if ((s & 0xFFFFULL) == 0 && w->deadline > 0.0 && nowms_s() > w->deadline)
+            { *w->stop = 1; break; }
+    }
+    return NULL;
+}
+
+Sweep48Result sweep48MT(const Anchor48 *a, uint64_t start, uint64_t end,
+                        double budgetSec, int numThreads, U64Vec *out) {
+#if defined(__EMSCRIPTEN__)
+    // Sem -pthread o pthread_create aborta em runtime; o JS paraleliza
+    // via Web Workers (uma fatia [start,end) por worker). Igual ao crack 32.
+    numThreads = 1;
+#endif
+    Sweep48Result r = {0, 0, numThreads < 1 ? 1 : numThreads};
+    if (numThreads < 1) numThreads = 1;
+    if (start >= end) return r; // range vazio/invalido: sem particionamento
+    // Fatia >= 1 s48 por worker: garante part > 0 (sem dupplicacao/perda de
+    // cobertura) e protege a divisao. Range minusculo vai todo num worker so'.
+    if ((uint64_t)numThreads > end - start) numThreads = 1;
+    volatile int stop = 0;
+    double deadline = budgetSec > 0.0 ? nowms_s() + budgetSec * 1000.0 : 0.0;
+    SweepWorker *ws = calloc((size_t)numThreads, sizeof(SweepWorker));
+    CrackThread *th = calloc((size_t)numThreads, sizeof(CrackThread));
+    uint64_t part = (end - start) / (uint64_t)numThreads;
+    for (int i = 0; i < numThreads; i++) {
+        ws[i].a = a; ws[i].start = start + (uint64_t)i * part;
+        ws[i].end = (i == numThreads - 1) ? end : start + (uint64_t)(i + 1) * part;
+        ws[i].deadline = deadline; ws[i].stop = &stop;
+    }
+    if (numThreads == 1) sweep48Worker(&ws[0]); // inline (WASM e range pequeno)
+    else { for (int i = 0; i < numThreads; i++) th[i] = crackThreadCreate(sweep48Worker, &ws[i]);
+           for (int i = 0; i < numThreads; i++) crackThreadJoin(th[i]); }
+    // timedOut espelha o stop compartilhado: um worker que estourou o deadline
+    // marca todos, mesmo os que completaram a propria fatia.
+    r.timedOut = stop; r.threads = numThreads;
+    // checked somado dos workers sob timeout e' contagem parcial (mesmo
+    // comportamento aceito do seedfinder_crack de 32 bits).
+    for (int i = 0; i < numThreads; i++) {
+        r.checked += ws[i].checked;
+        for (int k = 0; k < ws[i].out.n; k++) u64Push(out, ws[i].out.v[k]);
+        free(ws[i].out.v);
+    }
+    free(ws); free(th);
+    return r;
+}
