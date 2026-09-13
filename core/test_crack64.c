@@ -106,6 +106,32 @@ static int testSweepMT(void) {
     return 0;
 }
 
+// Ramo de resto da particao: len = 2^24+1 com 3 threads => part = (2^24+1)/3
+// com sobra de 2 seeds absorvidas pela Ultima fatia (o ternario `i ==
+// numThreads-1 ? end`). Sem ele, cobertura ficaria em 2^24+1 - 2.
+static int testSweepMTRemainder(void) {
+    uint64_t full = 7777777777777777777ULL;
+    Anchor48 a = mkAnchors(full, 0);
+    uint64_t s48 = full & C64_M48;
+    const uint64_t len = MT_LEN + 1;
+    U64Vec out = {0};
+    Sweep48Result r = sweep48MT(&a, MT_LO, MT_LO + len, 120.0, 3, &out);
+    assert(r.threads == 3);
+    assert(r.checked == len); // exato: sem perda nem duplicacao no resto
+    int found = 0;
+    for (int i = 0; i < out.n; i++) if (out.v[i] == s48) found = 1;
+    assert(found);
+    U64Vec st = {0}; int to = 0;
+    sweep48(&a, MT_LO, MT_LO + len, 0.0, &st, &to);
+    assert(!to && st.n == out.n);
+    qsort(st.v, (size_t)st.n, sizeof(uint64_t), cmpu64);
+    qsort(out.v, (size_t)out.n, sizeof(uint64_t), cmpu64);
+    for (int i = 0; i < st.n; i++) assert(st.v[i] == out.v[i]);
+    free(st.v); free(out.v);
+    printf("SWEEP_MT_REMAINDER_OK\n");
+    return 0;
+}
+
 static int testSweepMTTimeout(void) {
     uint64_t full = 7777777777777777777ULL;
     Anchor48 a = mkAnchors(full, 0);
@@ -124,5 +150,6 @@ int main(void) {
     if (testParity()) return 1;
     if (testSweep()) return 1;
     if (testSweepMT()) return 1;
+    if (testSweepMTRemainder()) return 1;
     return testSweepMTTimeout();
 }
