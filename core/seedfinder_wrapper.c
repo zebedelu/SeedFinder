@@ -2,6 +2,7 @@
 #include "ChunkBiomesGUI/cubiomes/generator.h"
 #include "ChunkBiomesGUI/cubiomes/finders.h"
 #include "ChunkBiomesGUI/cubiomes/util.h"
+#include "crack64.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,8 +56,9 @@ static int compareByDistance(const void *a, const void *b)
 
 /* Bedrock checks the biome at the structure's OWN position cell; the upstream
  * Java-style gate samples an offset door corner and passes positions sitting
- * on swamp/river/etc. Shared by /scan and the crack result filter. */
-static int structureIsViable(int structureType, Generator *g, int x, int z)
+ * on swamp/river/etc. Shared by /scan and the crack result filter. Declared
+ * in crack64.h — seedfinder_crack64's 16-bit biome lift calls it too. */
+int structureIsViable(int structureType, Generator *g, int x, int z)
 {
     if (!isViableBedrockStructurePos(structureType, g, x, z, 0))
         return 0;
@@ -732,4 +734,20 @@ SEEDFINDER_API char *seedfinder_crack(
     free(m);
     free(pids); free(workers); free(hits); free(all);
     return buf;
+}
+
+/* ============================ SeedCracker 64-bit ============================
+ * Thin export shim: the whole pipeline lives in core/crack64.c (it needs the
+ * shared structureIsViable defined above). The real symbol is kept non-static
+ * so the C test binary (which links this TU) can call it directly too. */
+
+SEEDFINDER_API char *seedfinder_crack64_shim(
+    const int *mtTypes, const double *mtX, const double *mtZ, int nMt,
+    const int *jTypes, const double *jX, const double *jZ, int nJava,
+    int tolerance, uint64_t startSeed, uint64_t endSeed,
+    int maxResults, double budgetSec, int numThreads)
+{
+    return seedfinder_crack64(mtTypes, mtX, mtZ, nMt, jTypes, jX, jZ, nJava,
+                              tolerance, startSeed, endSeed, maxResults,
+                              budgetSec, numThreads);
 }

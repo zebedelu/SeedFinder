@@ -1,6 +1,10 @@
-// core/crack64.c (Task 3 fast-path + Task 4 sweep48)
+// core/crack64.c (Task 3 fast-path + Task 4 sweep48 + Task 6 crack64 pipeline)
 #include "crack64.h"
+#include "ChunkBiomesGUI/Bfinders.h"
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <limits.h>
 #include <assert.h>
 #include "platform_threads.h" // (Task 2) — usado na Task 5; ja incluido aqui sem custo
 
@@ -169,4 +173,303 @@ Sweep48Result sweep48MT(const Anchor48 *a, uint64_t start, uint64_t end,
     }
     free(ws); free(th);
     return r;
+}
+
+// --- pipeline de seed completa (Task 6) -----------------------------------
+// Estagio 1: ancora Java + alvos MT (celulas de regiao pre-computadas uma vez,
+// espelhando CrackTarget do crack de 32 bits).
+// Estagio 2: sweep48MT na janela de s48 INDUZIDA por [startSeed,endSeed)
+//   (ruling do controller: span < 2^48 nunca varre o espaco inteiro). Com
+//   span < 2^48 a janela e' [start&M48, ((end-1)&M48)+1) mod 2^48 — ate' duas
+//   pecas quando envolve; span >= 2^48 => varredura completa [0,2^48).
+//   Limite: para span < 2^48 cada s48 admite NO MAXIMO 1 hi (full = hi*2^48 +
+//   s48; dois hi distintos difeririam em >= 2^48 fora do span) — o loop de
+//   lift abaixo aceita ate' hiHi-hiLo+1 valores com filtro de range, entao
+//   vale tambem no caso geral (span grande => ate' 2^16 hi por s48, carreados
+//   pelo deadline global).
+// Estagios 3+4 (fused por candidato, para nao materializar Cand[]): cruzamento
+//   do placement MT (so' depende de s48 & M32 — mix_seed->mSetSeed truncam em
+//   32 bits, ver Brng.h) com o alvo, depois lift dos 16 bits altos testando
+//   structureIsViable (bioma = unica coisa que depende de hi) em cada full seed
+//   do range.
+
+#define C64_MAXREGS 64
+
+#ifdef C64_TRACE
+/* gcc -DC64_TRACE ... => timing por estagio no stderr (diagnostico local;
+ * codigo zero quando nao definido). */
+static double g_trMs;
+#define TR0()        (g_trMs = nowms_s())
+#define TR_STAGE(s)  do { double n_ = nowms_s(); \
+    fprintf(stderr, "[c64] %s: %.0f ms\n", (s), n_ - g_trMs); g_trMs = n_; } while (0)
+#else
+#define TR0()        ((void)0)
+#define TR_STAGE(s)  ((void)0)
+#endif
+
+typedef struct {
+    int       type;
+    long long chunkX, chunkZ;
+    int       maxD2;
+    int       nReg;
+    int       regX[C64_MAXREGS], regZ[C64_MAXREGS];
+} MtTarget;
+
+// Matches por hit: (nMt + nJava) pares de blocos, em ordem de entrada
+// (MTs primeiro, depois Java-style) — 4*C64_MAX ints de folga.
+typedef struct { uint64_t seed; int64_t score; int match[4 * C64_MAX]; } Hit64;
+
+static long long c64FloorChunk(double x) { // bloco -> chunk, floor (conv. crack 32)
+    return (x >= 0) ? (long long)x / 16 : ((long long)x - 15) / 16;
+}
+
+static void c64SwapJavaRow(Anchor48 *a, int i, int j) {
+    if (i == j) return;
+    JavaCfg c = a->cfg[i]; a->cfg[i] = a->cfg[j]; a->cfg[j] = c;
+    long long v = a->chunkX[i]; a->chunkX[i] = a->chunkX[j]; a->chunkX[j] = v;
+    v = a->chunkZ[i]; a->chunkZ[i] = a->chunkZ[j]; a->chunkZ[j] = v;
+    int k = a->nRegions[i]; a->nRegions[i] = a->nRegions[j]; a->nRegions[j] = k;
+    int tmp[C64_MAXREGS];
+    memcpy(tmp, a->regX[i], sizeof tmp);
+    memcpy(a->regX[i], a->regX[j], sizeof tmp);
+    memcpy(a->regX[j], tmp, sizeof tmp);
+    memcpy(tmp, a->regZ[i], sizeof tmp);
+    memcpy(a->regZ[i], a->regZ[j], sizeof tmp);
+    memcpy(a->regZ[j], tmp, sizeof tmp);
+}
+
+char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mtZ, int nMt,
+                         const int *jTypes, const double *jX, const double *jZ, int nJava,
+                         int tolerance, uint64_t startSeed, uint64_t endSeed,
+                         int maxResults, double budgetSec, int numThreads) {
+    if (nMt < 1 || nMt > C64_MAX) return strdup("{\"error\":\"1-24 MT structures required\"}");
+    if (nJava < 1 || nJava > C64_MAX)
+        return strdup("{\"error\":\"64-bit mode requires at least one Java-style anchor "
+                      "(Trail Ruins=23 or Trial Chambers=24)\"}");
+    if (tolerance < 0 || tolerance > 8)
+        return strdup("{\"error\":\"tolerance must be between 0 and 8 chunks\"}");
+    if (maxResults <= 0 || maxResults > 2000)
+        return strdup("{\"error\":\"maxResults must be between 1 and 2000\"}");
+    if (numThreads < 1 || numThreads > 64) numThreads = 8;
+    if (endSeed > (1ULL << 63)) endSeed = 1ULL << 63; // seeds Bedrock sao signed
+    if (startSeed >= endSeed)   return strdup("{\"error\":\"empty seed range\"}");
+
+    /* --- Estagio 1: alvos ------------------------------------------------ */
+    int maxD2 = tolerance * tolerance;
+    MtTarget mt[C64_MAX];
+    for (int i = 0; i < nMt; i++) {
+        int t = mtTypes[i];
+        if (t == Mineshaft)
+            return strdup("{\"error\":\"Mineshaft is not supported by SeedCracker\"}");
+        if (t == Trail_Ruins || t == Trial_Chambers)
+            return strdup("{\"error\":\"Trail Ruins and Trial Chambers must be passed as "
+                          "Java-style anchors in 64-bit mode\"}");
+        StructureConfig sc;
+        if (!getBedrockStructureConfig(t, MC_NEWEST, &sc))
+            return strdup("{\"error\":\"unknown structure type\"}");
+        long long cx = c64FloorChunk(mtX[i]), cz = c64FloorChunk(mtZ[i]);
+        if (cx < -100000000LL || cx > 100000000LL ||
+            cz < -100000000LL || cz > 100000000LL)
+            return strdup("{\"error\":\"coordinates out of range\"}");
+        int rs = sc.regionSize;
+        mt[i].type = t; mt[i].maxD2 = maxD2; mt[i].nReg = 0;
+        mt[i].chunkX = cx; mt[i].chunkZ = cz;
+        // celulas candidatas: mesma formula floor-div do seedfinder_crack/anchor48Build
+        long long lox = (cx - tolerance - (rs - 1)) / rs;
+        long long hix = (cx + tolerance >= 0) ? (cx + tolerance) / rs
+                                              : (cx + tolerance - (rs - 1)) / rs;
+        long long loz = (cz - tolerance - (rs - 1)) / rs;
+        long long hiz = (cz + tolerance >= 0) ? (cz + tolerance) / rs
+                                              : (cz + tolerance - (rs - 1)) / rs;
+        int k = 0;
+        for (long long x = lox; x <= hix && k < C64_MAXREGS; x++)
+            for (long long z = loz; z <= hiz && k < C64_MAXREGS; z++)
+                { mt[i].regX[k] = (int)x; mt[i].regZ[k] = (int)z; k++; }
+        if (k == 0) return strdup("{\"error\":\"invalid coordinates\"}");
+        mt[i].nReg = k;
+    }
+    for (int i = 0; i < nJava; i++) {
+        long long cx = c64FloorChunk(jX[i]), cz = c64FloorChunk(jZ[i]);
+        if (cx < -100000000LL || cx > 100000000LL ||
+            cz < -100000000LL || cz > 100000000LL)
+            return strdup("{\"error\":\"coordinates out of range\"}");
+    }
+    Anchor48 anc;
+    if (anchor48Build(&anc, jTypes, jX, jZ, nJava, tolerance) != 0)
+        return strdup("{\"error\":\"invalid coordinates\"}");
+    // ordem de varredura: menos celulas primeiro (filtro mais forte cedo,
+    // espelhando crackTargetCompare); jOrder mapeia linha -> indice de entrada.
+    int jOrder[C64_MAX];
+    for (int j = 0; j < anc.nJava; j++) jOrder[j] = j;
+    for (int i = 0; i < anc.nJava; i++) {
+        int best = i;
+        for (int j = i + 1; j < anc.nJava; j++)
+            if (anc.nRegions[j] < anc.nRegions[best]) best = j;
+        if (best != i) {
+            c64SwapJavaRow(&anc, i, best);
+            int o = jOrder[i]; jOrder[i] = jOrder[best]; jOrder[best] = o;
+        }
+    }
+    const MtTarget *mOrd[C64_MAX]; // idem para o cruzamento MT
+    for (int i = 0; i < nMt; i++) mOrd[i] = &mt[i];
+    for (int i = 1; i < nMt; i++) {
+        const MtTarget *key = mOrd[i];
+        int j = i - 1;
+        while (j >= 0 && mOrd[j]->nReg > key->nReg) { mOrd[j + 1] = mOrd[j]; j--; }
+        mOrd[j + 1] = key;
+    }
+
+    /* --- Estagio 2: sweep 2^48 na janela bounded ------------------------- */
+    uint64_t span = endSeed - startSeed;
+    uint64_t wLo[2], wHi[2]; int nWin;
+    if (span >= (1ULL << 48)) { wLo[0] = 0; wHi[0] = 1ULL << 48; nWin = 1; }
+    else {
+        uint64_t sLo = startSeed & C64_M48;
+        uint64_t sHi = ((endSeed - 1) & C64_M48) + 1; // (0, 2^48]
+        if (sLo < sHi) { wLo[0] = sLo; wHi[0] = sHi; nWin = 1; }
+        else { // janela envolve mod 2^48: duas pecas disjuntas, sem duplicata
+            wLo[0] = sLo; wHi[0] = 1ULL << 48;
+            wLo[1] = 0;   wHi[1] = sHi;       nWin = 2;
+        }
+    }
+    // deadline GLOBAL: cobre sweep + cross + lift (ruling 7).
+    TR0();
+    double deadline = budgetSec > 0.0 ? nowms_s() + budgetSec * 1000.0 : 0.0;
+    U64Vec s48s = {0};
+    uint64_t swept = 0; int effThreads = numThreads, sweepTo = 0;
+    for (int i = 0; i < nWin && !sweepTo; i++) {
+        double rem = deadline > 0.0 ? (deadline - nowms_s()) / 1000.0 : budgetSec;
+        if (deadline > 0.0 && rem <= 0.0) { sweepTo = 1; break; }
+        Sweep48Result r = sweep48MT(&anc, wLo[i], wHi[i], rem, numThreads, &s48s);
+        swept += r.checked; effThreads = r.threads;
+        if (r.timedOut) sweepTo = 1;
+    }
+#ifdef C64_TRACE
+    fprintf(stderr, "[c64] sweep %llu s48s -> %d survivors\n",
+            (unsigned long long)swept, s48s.n);
+#endif
+    TR_STAGE("stage2 sweep");
+    if (sweepTo) {
+        free(s48s.v);
+        return strdup("{\"error\":\"2^48 sweep exceeded budget - raise max_seconds, "
+                      "provide 4+ Trial Chambers, or narrow start/end\"}");
+    }
+
+    /* --- Estagios 3+4 fused: cross MT + lift 2^16 via bioma -------------- */
+    Hit64 *hits = malloc((size_t)maxResults * sizeof(Hit64));
+    int nHits = 0, worstIdx = -1;
+    int64_t worst = INT64_MAX; // mesmo processo record-min do crackInsert de 32b
+    Generator g;
+    setupGenerator(&g, MC_NEWEST, 0);
+    uint64_t hiLo = startSeed >> 48, hiHi = (endSeed - 1) >> 48;
+    uint64_t lifted = 0; int liftTo = 0;
+    for (int i = 0; i < s48s.n && !liftTo; i++) {
+        // o cross pode eliminar TODOS os candidatos sem nunca entrar no lift —
+        // checar o deadline aqui tambem (a cada ~1M s48, ~0.5 s de cross).
+        if ((i & 0xFFFFF) == 0xFFFFF && deadline > 0.0 && nowms_s() > deadline) { liftTo = 1; break; }
+        uint64_t s48 = s48s.v[i];
+        uint32_t s32 = (uint32_t)(s48 & 0xFFFFFFFFULL);
+        int mx[2 * C64_MAX]; // placement MT (blocos) por indice de entrada
+        int64_t score = 0; int ok = 1;
+        for (int m = 0; m < nMt && ok; m++) {
+            const MtTarget *t = mOrd[m];
+            int k = (int)(t - mt);
+            int bestD = INT32_MAX, bx = 0, bz = 0;
+            for (int r = 0; r < t->nReg; r++) {
+                Pos pos;
+                if (!getBedrockStructurePos(t->type, MC_NEWEST, s32,
+                                            t->regX[r], t->regZ[r], &pos))
+                    continue;
+                long long cx = ((long long)pos.x - 8) >> 4; // chunk anchor (conv. 32b)
+                long long cz = ((long long)pos.z - 8) >> 4;
+                long long dx = cx - t->chunkX, dz = cz - t->chunkZ;
+                long long d2 = dx * dx + dz * dz;
+                if (d2 < bestD) {
+                    bestD = (int)d2; bx = pos.x; bz = pos.z;
+                    if (d2 == 0) break;
+                }
+            }
+            if (bestD == INT32_MAX || bestD > t->maxD2) { ok = 0; break; }
+            mx[k * 2] = bx; mx[k * 2 + 1] = bz;
+            score += bestD; // score = soma d² dos hits das ancoras MT
+        }
+        if (!ok) continue;
+        for (uint64_t hi = hiLo; hi <= hiHi; hi++) {
+            uint64_t full = (hi << 48) | s48;
+            if (full < startSeed || full >= endSeed) continue;
+            lifted++;
+            applySeed(&g, DIM_OVERWORLD, full);
+            int viable = 1;
+            for (int k = 0; k < nMt; k++)
+                if (!structureIsViable(mtTypes[k], &g, mx[k * 2], mx[k * 2 + 1]))
+                    { viable = 0; break; }
+            if (viable && (nHits < maxResults || score < worst)) {
+                int slot = (nHits < maxResults) ? nHits++ : worstIdx;
+                Hit64 *h = &hits[slot];
+                h->seed = full; h->score = score;
+                memcpy(h->match, mx, (size_t)nMt * 2 * sizeof(int));
+                // matches Java-style: placement real sob a seed completa na
+                // melhor celula da ancora (o sweep garante d² <= maxD2).
+                for (int j = 0; j < anc.nJava; j++) {
+                    int bestR = 0; long long bestD = LLONG_MAX;
+                    for (int r = 0; r < anc.nRegions[j]; r++) {
+                        long long cx, cz;
+                        javaChunk(&anc.cfg[j], s48, anc.regX[j][r], anc.regZ[j][r], &cx, &cz);
+                        long long dx = cx - anc.chunkX[j], dz = cz - anc.chunkZ[j];
+                        long long d2 = dx * dx + dz * dz;
+                        if (d2 < bestD) { bestD = d2; bestR = r; }
+                    }
+                    int px, pz;
+                    Pos pos;
+                    if (getStructurePos(jTypes[jOrder[j]], MC_NEWEST, full,
+                                        anc.regX[j][bestR], anc.regZ[j][bestR], &pos)) {
+                        px = pos.x; pz = pos.z;
+                    } else { // cinto de seguranca: bloco implícito em javaChunk
+                        long long cx, cz;
+                        javaChunk(&anc.cfg[j], s48, anc.regX[j][bestR], anc.regZ[j][bestR], &cx, &cz);
+                        px = (int)((cx + 1) << 4); pz = (int)((cz + 1) << 4);
+                    }
+                    int *mm = h->match + (nMt + jOrder[j]) * 2;
+                    mm[0] = px; mm[1] = pz;
+                }
+                worst = INT64_MAX; worstIdx = -1;
+                for (int q = 0; q < nHits; q++)
+                    if (hits[q].score < worst) { worst = hits[q].score; worstIdx = q; }
+            }
+            if ((lifted & 1023ULL) == 0 && deadline > 0.0 && nowms_s() > deadline)
+                { liftTo = 1; break; }
+        }
+    }
+    free(s48s.v);
+    TR_STAGE("stages 3+4 cross+lift");
+
+    /* insertion sort ascending por score (mesmo padrao do crack de 32 bits) */
+    for (int i = 1; i < nHits; i++) {
+        Hit64 key = hits[i];
+        int j = i - 1;
+        while (j >= 0 && hits[j].score > key.score) { hits[j + 1] = hits[j]; j--; }
+        hits[j + 1] = key;
+    }
+
+    /* envelope identico ao do seedfinder_crack + seed_str + "bits":64.
+     * piores casos por item: 104 fixos (seed/seed_str/score %lld ate' 20
+     * digitos) + 26 por par de match + 3; folga generosa. */
+    int nPairs = nMt + nJava;
+    size_t cap = 256 + (size_t)nHits * ((size_t)nPairs * 28 + 160);
+    char *buf = malloc(cap);
+    int off = sprintf(buf, "{\"results\":[");
+    for (int i = 0; i < nHits; i++) {
+        off += sprintf(buf + off,
+                       "%s{\"seed\":%lld,\"seed_str\":\"%lld\",\"score\":%lld,\"matches\":[",
+                       i ? "," : "", (long long)hits[i].seed, (long long)hits[i].seed,
+                       (long long)hits[i].score);
+        for (int k = 0; k < nPairs; k++)
+            off += sprintf(buf + off, "%s[%d,%d]", k ? "," : "",
+                           hits[i].match[k * 2], hits[i].match[k * 2 + 1]);
+        off += sprintf(buf + off, "]}");
+    }
+    sprintf(buf + off, "],\"checked\":%llu,\"timed_out\":%s,\"threads\":%d,\"bits\":64}",
+            (unsigned long long)swept, liftTo ? "true" : "false", effThreads);
+    free(hits);
+    return buf;
 }

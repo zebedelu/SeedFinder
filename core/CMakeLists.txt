@@ -43,6 +43,7 @@ target_link_libraries(bfinders_static PUBLIC cubiomes_static)
 # Our shared library (DLL)
 add_library(seedfinder_lib SHARED
  ${CMAKE_CURRENT_SOURCE_DIR}/seedfinder_wrapper.c
+ ${CMAKE_CURRENT_SOURCE_DIR}/crack64.c
 )
 target_include_directories(seedfinder_lib PRIVATE
  ${SEEDFINDER_ROOT}

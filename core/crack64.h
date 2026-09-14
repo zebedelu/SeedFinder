@@ -2,11 +2,16 @@
 #define SEEDFINDER_CRACK64_H_
 #include <stdint.h>
 #include "ChunkBiomesGUI/cubiomes/finders.h"
+#include "ChunkBiomesGUI/cubiomes/generator.h"
 
 #define C64_M48   0xFFFFFFFFFFFFULL
 #define C64_MUL   0x5DEECE66DULL
 #define C64_ADD   0xBULL
 #define C64_MAX   24
+
+// Definida em core/seedfinder_wrapper.c (gate de bioma compartilhado por
+// /scan, seedfinder_crack e o lift de seedfinder_crack64).
+int structureIsViable(int structureType, Generator *g, int x, int z);
 
 typedef struct { int regionSize, chunkRange; uint64_t salt; } JavaCfg;
 int  javaCfgFor(int structureType, JavaCfg *out);
@@ -37,4 +42,15 @@ typedef struct { uint64_t checked; int timedOut, threads; } Sweep48Result;
 // um com vetor proprio (merge pos-join). budgetSec <= 0 => sem deadline.
 Sweep48Result sweep48MT(const Anchor48 *a, uint64_t start, uint64_t end,
                         double budgetSec, int numThreads, U64Vec *out);
+
+// Crack de seed completa Bedrock (0 <= seed < 2^63): varre o residual de 48
+// bits com as ancoras Java-style (Trail Ruins/Trial Chambers), cruza com o
+// placement MT (mod 2^32) das estruturas Bedrock e levanta os 16 bits altos
+// pelo filtro de bioma (structureIsViable). JSON igual ao do seedfinder_crack
+// de 32 bits + "seed_str" por item + "bits":64 no envelope. O retorno e'
+// malloc'd; liberar com seedfinder_free_result.
+char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mtZ, int nMt,
+                         const int *jTypes, const double *jX, const double *jZ, int nJava,
+                         int tolerance, uint64_t startSeed, uint64_t endSeed,
+                         int maxResults, double budgetSec, int numThreads);
 #endif
