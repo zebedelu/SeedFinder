@@ -34,6 +34,24 @@ _CRACK_ARGTYPES = [
 ]
 
 
+_CRACK64_ARGTYPES = [
+    ctypes.POINTER(ctypes.c_int),    # MT structure type ids
+    ctypes.POINTER(ctypes.c_double), # MT x block coordinates
+    ctypes.POINTER(ctypes.c_double), # MT z block coordinates
+    ctypes.c_int,                    # number of MT structures
+    ctypes.POINTER(ctypes.c_int),    # Java anchor type ids (23/24)
+    ctypes.POINTER(ctypes.c_double), # Java anchor x block coordinates
+    ctypes.POINTER(ctypes.c_double), # Java anchor z block coordinates
+    ctypes.c_int,                    # number of Java anchors
+    ctypes.c_int,                    # tolerance in chunks
+    ctypes.c_uint64,                 # start seed (inclusive, 64-bit)
+    ctypes.c_uint64,                 # end seed (exclusive, 64-bit)
+    ctypes.c_int,                    # max results
+    ctypes.c_double,                 # time budget in seconds
+    ctypes.c_int,                    # number of threads
+]
+
+
 def _bind(handle) -> None:
     """Attach argvtypes/restypes to a freshly loaded CDLL handle."""
     handle.seedfinder_scan.argtypes = _SCAN_ARGTYPES
@@ -50,6 +68,10 @@ def _bind(handle) -> None:
         handle.seedfinder_crack.argtypes = _CRACK_ARGTYPES
         # c_void_p keeps the raw malloc'd pointer; freed via seedfinder_free_result.
         handle.seedfinder_crack.restype = ctypes.c_void_p
+    # Same degrade rule for the 64-bit engine: a lib predating it is valid.
+    if hasattr(handle, "seedfinder_crack64_shim"):
+        handle.seedfinder_crack64_shim.argtypes = _CRACK64_ARGTYPES
+        handle.seedfinder_crack64_shim.restype = ctypes.c_void_p
 
 
 def _candidates() -> list[str]:
