@@ -181,11 +181,63 @@ static int testCrack64(void) {
     printf("CRACK64_OK\n"); return 0;
 }
 
+// Fix-round-1 regression (reviewer finding 2): the lift must accept the best
+// VIABLE placement per MT anchor across cells, not only the single nearest.
+// Scenario found by brute-force probe (build_server/verify_viable.c) and
+// re-asserted inline below: with an Ocean_Ruin anchor observed near chunk
+// (-37,-25) at tolerance 8 under FULL, the NEAREST in-tolerance placement
+// (cell (-2,-2), d²=52) is biome-DEAD while the true placement (cell (-2,-1),
+// d²=58) is biome-VIABLE. A single-best lift tests only the dead nearest and
+// PRUNES the true seed; the best-viable lift finds the farther live one. If
+// the biome premise ever stops holding the asserts fail loudly (test never
+// degrades into a silent no-op), and the crack64 recovery assert is the point.
+static int testCrack64Viable(void) {
+    const uint64_t FULL = 7777777777777777777ULL;
+    uint32_t s32 = (uint32_t)(FULL & 0xFFFFFFFFULL);
+    Generator g; setupGenerator(&g, MC_NEWEST, 0); applySeed(&g, DIM_OVERWORLD, FULL);
+
+    // premise (recomputed, not hardcoded): true cell(-2,-1) viable, dead
+    // sibling cell(-2,-2) is the NEAREST to observed anchor O=(-584,-392).
+    Pos q; assert(getBedrockStructurePos(Ocean_Ruin, MC_NEWEST, s32, -2, -1, &q));
+    Pos d; assert(getBedrockStructurePos(Ocean_Ruin, MC_NEWEST, s32, -2, -2, &d));
+    assert(isViableBedrockStructurePos(Ocean_Ruin, &g, q.x, q.z, 0));   // true one VIABLE
+    assert(!isViableBedrockStructurePos(Ocean_Ruin, &g, d.x, d.z, 0));  // nearer one DEAD
+    long long ox = -584, oz = -392; // observed anchor blocks (chunk -37,-25)
+    long long ochx = (ox >= 0) ? ox / 16 : (ox - 15) / 16; // floorDiv to chunk
+    long long ochz = (oz >= 0) ? oz / 16 : (oz - 15) / 16;
+    // confirm d(dead nearest) < d(viable true), both within tol=8
+    long long dqx = (((long long)q.x - 8) >> 4) - ochx;
+    long long dqz = (((long long)q.z - 8) >> 4) - ochz;
+    long long ddx = (((long long)d.x - 8) >> 4) - ochx;
+    long long ddz = (((long long)d.z - 8) >> 4) - ochz;
+    long long d2viable = dqx * dqx + dqz * dqz, d2dead = ddx * ddx + ddz * ddz;
+    assert(d2dead < d2viable);          // single-best would pick the DEAD one
+    assert(d2viable <= 64 && d2dead <= 64); // both in-tolerance (tol=8)
+
+    // Trial Chambers anchor (same as testCrack64) pins the s48 window.
+    Pos p; assert(getStructurePos(Trial_Chambers, MC_NEWEST, FULL, 0, 0, &p));
+    int    jT[1] = { Trial_Chambers };
+    double jX[1] = { (double)((p.x - 8) >> 4) * 16 }, jZ[1] = { (double)((p.z - 8) >> 4) * 16 };
+    int    mT[1] = { Ocean_Ruin };
+    double mX[1] = { (double)ox }, mZ[1] = { (double)oz };
+
+    uint64_t W = 0x2000;
+    char *json = seedfinder_crack64(mT, mX, mZ, 1, jT, jX, jZ, 1, 8,
+                                    FULL - W, FULL + W, 2000, 60.0, 2);
+    assert(json);
+    int ok = strstr(json, "7777777777777777777") != NULL;
+    if (!ok) fprintf(stderr, "CRACK64_VIABLE FAIL: %s\n", json);
+    free(json);
+    assert(ok); // best-viable lift recovered the seed the single-best lift would prune
+    printf("CRACK64_VIABLE_OK\n"); return 0;
+}
+
 int main(void) {
     if (testParity()) return 1;
     if (testSweep()) return 1;
     if (testSweepMT()) return 1;
     if (testSweepMTRemainder()) return 1;
     if (testSweepMTTimeout()) return 1;
-    return testCrack64();
+    if (testCrack64()) return 1;
+    return testCrack64Viable();
 }

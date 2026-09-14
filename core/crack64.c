@@ -189,9 +189,12 @@ Sweep48Result sweep48MT(const Anchor48 *a, uint64_t start, uint64_t end,
 //   pelo deadline global).
 // Estagios 3+4 (fused por candidato, para nao materializar Cand[]): cruzamento
 //   do placement MT (so' depende de s48 & M32 — mix_seed->mSetSeed truncam em
-//   32 bits, ver Brng.h) com o alvo, depois lift dos 16 bits altos testando
-//   structureIsViable (bioma = unica coisa que depende de hi) em cada full seed
-//   do range.
+//   32 bits, ver Brng.h) com o alvo, GUARDANDO todas as celulas dentro de
+//   tolerancia ordenadas por d²; o lift dos 16 bits altos escolhe entao, por
+//   ancora, o placement viavel MAIS PROXIMO sob a seed completa (bioma = unica
+//   coisa que depende de hi) — irmao mais proximo em bioma ruim nao esconde o
+//   placement verdadeiro mais distante (mesma preferencia do loop de
+//   validacao final do crack de 32 bits, seedfinder_wrapper.c:666-686).
 
 #define C64_MAXREGS 64
 
@@ -355,7 +358,14 @@ char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mt
                       "provide 4+ Trial Chambers, or narrow start/end\"}");
     }
 
-    /* --- Estagios 3+4 fused: cross MT + lift 2^16 via bioma -------------- */
+    /* --- Estagios 3+4 fused: cross MT + lift 2^16 via bioma --------------
+     * O cross (estagio 3) nao depende de hi: coleta, por ancora MT, TODAS as
+     * celulas cujo placement cai dentro de tolerancia (par d²,bloco). O lift
+     * (estagio 4) escolhe, por ancora, o placement viavel de MENOR d² sob a
+     * seed completa — um irmao mais proximo em bioma ruim nao pode esconder o
+     * placement verdadeiro mais distante que gera in-game (mesma semantica do
+     * loop de validacao final do crack de 32 bits: seedfinder_wrapper.c
+     * :666-686). score = soma dos d² escolhidos. */
     Hit64 *hits = malloc((size_t)maxResults * sizeof(Hit64));
     int nHits = 0, worstIdx = -1;
     int64_t worst = INT64_MAX; // mesmo processo record-min do crackInsert de 32b
@@ -363,18 +373,32 @@ char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mt
     setupGenerator(&g, MC_NEWEST, 0);
     uint64_t hiLo = startSeed >> 48, hiHi = (endSeed - 1) >> 48;
     uint64_t lifted = 0; int liftTo = 0;
+    typedef struct { int d2; int x; int z; } C64Cand;
     for (int i = 0; i < s48s.n && !liftTo; i++) {
         // o cross pode eliminar TODOS os candidatos sem nunca entrar no lift —
         // checar o deadline aqui tambem (a cada ~1M s48, ~0.5 s de cross).
         if ((i & 0xFFFFF) == 0xFFFFF && deadline > 0.0 && nowms_s() > deadline) { liftTo = 1; break; }
         uint64_t s48 = s48s.v[i];
         uint32_t s32 = (uint32_t)(s48 & 0xFFFFFFFFULL);
-        int mx[2 * C64_MAX]; // placement MT (blocos) por indice de entrada
-        int64_t score = 0; int ok = 1;
+
+        /* Estagio 3: coleta de celulas in-tolerance por ancora (ordem de
+         * entrada preservada via indice k). */
+        C64Cand *cands[C64_MAX] = {0};  // arrays empilhados por ancora
+        C64Cand candStore[C64_MAX][4];  // fast path: ate' 4 celulas/ancora
+        int nCand[C64_MAX];
+        int ok = 1;
         for (int m = 0; m < nMt && ok; m++) {
             const MtTarget *t = mOrd[m];
             int k = (int)(t - mt);
-            int bestD = INT32_MAX, bx = 0, bz = 0;
+            // celulas in-tolerance desta ancora
+            C64Cand *list = candStore[k];
+            int cap = 4;
+            if (t->nReg > cap) {                       // caminho raro (>4 celulas)
+                cap = t->nReg;
+                list = malloc((size_t)cap * sizeof(C64Cand));
+                if (!list) { ok = 0; break; }
+            }
+            int cnt = 0;
             for (int r = 0; r < t->nReg; r++) {
                 Pos pos;
                 if (!getBedrockStructurePos(t->type, MC_NEWEST, s32,
@@ -384,25 +408,44 @@ char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mt
                 long long cz = ((long long)pos.z - 8) >> 4;
                 long long dx = cx - t->chunkX, dz = cz - t->chunkZ;
                 long long d2 = dx * dx + dz * dz;
-                if (d2 < bestD) {
-                    bestD = (int)d2; bx = pos.x; bz = pos.z;
-                    if (d2 == 0) break;
-                }
+                if (d2 > t->maxD2) continue;
+                list[cnt].d2 = (int)d2; list[cnt].x = pos.x; list[cnt].z = pos.z;
+                cnt++;
             }
-            if (bestD == INT32_MAX || bestD > t->maxD2) { ok = 0; break; }
-            mx[k * 2] = bx; mx[k * 2 + 1] = bz;
-            score += bestD; // score = soma d² dos hits das ancoras MT
+            if (cnt == 0) {                              // ancora sem placement in-range
+                if (list != candStore[k]) free(list);
+                ok = 0; break;
+            }
+            cands[k] = list; nCand[k] = cnt;
         }
-        if (!ok) continue;
+        if (!ok) {                                       // descarta heap alocado neste s48
+            for (int m = 0; m < nMt; m++) {
+                int k = (int)(mOrd[m] - mt);
+                if (cands[k] && cands[k] != candStore[k]) free(cands[k]);
+            }
+            continue;
+        }
+
+        /* Estagio 4: para cada hi, escolhe o placement viavel de menor d². */
         for (uint64_t hi = hiLo; hi <= hiHi; hi++) {
             uint64_t full = (hi << 48) | s48;
             if (full < startSeed || full >= endSeed) continue;
             lifted++;
             applySeed(&g, DIM_OVERWORLD, full);
-            int viable = 1;
-            for (int k = 0; k < nMt; k++)
-                if (!structureIsViable(mtTypes[k], &g, mx[k * 2], mx[k * 2 + 1]))
-                    { viable = 0; break; }
+            int mx[2 * C64_MAX];        // placement MT escolhido (blocos) por entrada
+            int64_t score = 0; int viable = 1;
+            for (int k = 0; k < nMt && viable; k++) {
+                int bestD = INT32_MAX, bx = 0, bz = 0;
+                for (int c = 0; c < nCand[k]; c++) {
+                    const C64Cand *cd = &cands[k][c];
+                    if (cd->d2 > bestD) continue;        // ja' temos um mais proximo
+                    if (!structureIsViable(mtTypes[k], &g, cd->x, cd->z)) continue;
+                    bestD = cd->d2; bx = cd->x; bz = cd->z;
+                }
+                if (bestD == INT32_MAX) { viable = 0; break; } // sem placement viavel
+                mx[k * 2] = bx; mx[k * 2 + 1] = bz;
+                score += bestD;
+            }
             if (viable && (nHits < maxResults || score < worst)) {
                 int slot = (nHits < maxResults) ? nHits++ : worstIdx;
                 Hit64 *h = &hits[slot];
@@ -438,6 +481,11 @@ char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mt
             }
             if ((lifted & 1023ULL) == 0 && deadline > 0.0 && nowms_s() > deadline)
                 { liftTo = 1; break; }
+        }
+        // libera quaisquer listas heap do cross deste s48
+        for (int m = 0; m < nMt; m++) {
+            int k = (int)(mOrd[m] - mt);
+            if (cands[k] && cands[k] != candStore[k]) free(cands[k]);
         }
     }
     free(s48s.v);
