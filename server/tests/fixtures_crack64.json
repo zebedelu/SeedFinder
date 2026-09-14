@@ -1,0 +1,41 @@
+{
+  "seed": 4294972605,
+  "source": "Chunkbase 26.0 (not yet in-game verified)",
+  "note": "Real field data for the 64-bit acceptance test. Coordinates are in BLOCKS. 'type' values are cubiomes enum IDs (Chunkbase UI labels differ: igloo=6, jungle temple=7 -> cubiomes 4 and 2). The active anchors below were selected by probing every candidate through the crack64 pipeline itself (windowed sweep, tolerance 6): igloo + jungle pyramid is the pair that recovers the seed with a UNIQUE candidate (n=1). The Taiga village anchor was probed and REJECTED by the engine's biome lift (same divergence recorded for /scan in docs/verification/bedrock64-empirical.md), so it is excluded from mt_structures.",
+  "start_window": 4278195389,
+  "end_window": 4311749821,
+  "window_note": "seed +/- (1 << 24). An unbounded 2^63 request can never finish: the sweep is 2^48 residual per seed (~30M core-seconds). The windowed check mirrors core/test_crack64.c (FULL +/- 0x1000000) and the 32-bit test precedent of range-limited sweeps.",
+  "tolerance": 6,
+  "mt_structures": [
+    { "type": 4, "x": -280, "z": 104 },
+    { "type": 2, "x": 2584, "z": -1288 }
+  ],
+  "java_structures": [
+    { "type": 24, "x": -505, "z": -281 },
+    { "type": 24, "x": 263, "z": -311 },
+    { "type": 24, "x": -359, "z": 199 },
+    { "type": 24, "x": 231, "z": 169 }
+  ],
+  "all_data": {
+    "villages_chunkbase_labels": [
+      { "chunkbase_label": "Snowy(2)", "cubiomes_type": 5, "x": 296, "z": 232, "probe": "recovers" },
+      { "chunkbase_label": "Taiga(4)", "cubiomes_type": 5, "x": 760, "z": 216, "probe": "REJECTED by biome lift (Task 1 known risk)" },
+      { "chunkbase_label": "Plains(1)", "cubiomes_type": 5, "x": 1368, "z": -392, "probe": "recovers" },
+      { "chunkbase_label": "Savanna(3)", "cubiomes_type": 5, "x": 1256, "z": -5816, "probe": "recovers" },
+      { "chunkbase_label": "Desert(5)", "cubiomes_type": 5, "x": -9128, "z": -13352, "probe": "recovers" }
+    ],
+    "trial_chambers": [
+      { "cubiomes_type": 24, "x": -505, "z": -281 },
+      { "cubiomes_type": 24, "x": 263, "z": -311 },
+      { "cubiomes_type": 24, "x": -359, "z": 199 },
+      { "cubiomes_type": 24, "x": 231, "z": 169 }
+    ],
+    "extra_mt": [
+      { "chunkbase_label": "Desert Temple(8)", "cubiomes_type": 1, "x": -3048, "z": -296, "probe": "recovers" },
+      { "chunkbase_label": "Igloo(6)", "cubiomes_type": 4, "x": -280, "z": 104, "probe": "recovers", "selected": true },
+      { "chunkbase_label": "Jungle Temple(7)", "cubiomes_type": 2, "x": 2584, "z": -1288, "probe": "recovers", "selected": true },
+      { "chunkbase_label": "Witch Hut(9)", "cubiomes_type": 3, "x": 2136, "z": -280, "probe": "recovers" }
+    ],
+    "excluded_false_positive_risks": ["Trail Ruins (23)", "Outpost (10)", "Mansion (11)", "Shipwreck"]
+  }
+}

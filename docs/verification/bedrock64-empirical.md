@@ -74,6 +74,33 @@ Resultado (2026-09-13, gcc UCRT64): **INVARIANTS_OK** (exit 0).
   seed mod 2⁴⁸: verificada para Trial Chambers com
   base=7777777777777777777 vs twin=base & 0xFFFFFFFFFFFF em regiões [-2,2]².
 
+## Recuperação crack64 (Task 8 — metade automatizada do gate)
+
+Rota `POST /seedcracker` modo 64 (`server/tests/test_crack64_api.py::
+test_recovers_real_seed`, fixture `server/tests/fixtures_crack64.json`),
+seed de campo 4294972605 (> 2³²), janela obrigatória ±2²⁴ (varredura
+2⁴8-por-seed é inatingível sem bounded range — espelha `core/test_crack64.c`):
+
+| Campo | Valor |
+|---|---|
+| Âncoras MT (ativas) | Igloo (-280,104) + Jungle Pyramid (2584,-1288) |
+| Âncoras Java | 4× Trial Chambers (-505,-281), (263,-311), (-359,199), (231,169) |
+| tolerance | 6 chunks |
+| Resultado | **seed 4294972605 recuperada, candidato ÚNICO (score 0)** |
+| elapsed_ms | 1034 ms · checked = 33 554 432 · status `ok` (sem timeout) · 6 threads |
+
+Matriz de probes por âncora MT (cada uma + as 4 TCs, mesma janela — oracle =
+o próprio pipeline, script descartável em `build_server/probe_task8.py`):
+todas recuperam (Snowy/Plains/Savanna/Desert villages, Desert Temple, Igloo,
+Jungle Temple, Witch Hut); **Taiga village (760,216) é REJEITADA pelo lift de
+bioma sob a seed cheia** — mesma divergência de filtro já registrada na tabela
+acima (\*), agora confirmada no lado do crack64. Par Igloo+Jungle escolhido por
+produzir 1 único candidato (mais forte como regressão).
+
+Fontes dos dados: Chunkbase 26.0 (prévisões web, **ainda não verificadas
+in-game** — coluna "jogo" acima segue pendente). Trail Ruins/Outpost/Mansion/
+Shipwreck excluídos como âncoras (falsos positivos conhecidos).
+
 ## Gate
 
 Se /scan ou Chunkbase divergirem do **JOGO**, PARAR — o Brng/finders precisam de
@@ -83,8 +110,9 @@ reengenharia antes das Tasks 2+.
 Chunkbase 26.0 (13/13 pontos batem no nível de placement; 8/13 aparecem via /scan —
 as 5 divergências do /scan são explicadas: 4× truncamento 32-bit do scan para o
 caminho Java-style (esperado — é exatamente o gap do feature) + 1× filtro de bioma
-do scan na vila Taiga). Pendências antes de confiar no
-gate empiricamente "vs jogo": (a) preencher a coluna "jogo (1.21+)" criando o
+do scan na vila Taiga). **Metade automatizada do gate fechada (Task 8):** o
+crack64 recupera a seed de campo 4294972605 via rota HTTP com candidato único
+(seção acima). Pendências antes de fechar o gate empiricamente "vs jogo": (a) preencher a coluna "jogo (1.21+)" criando o
 mundo com seed 4294972605; (b) confirmar se o jogo usa os bits 32–47 para as
 trial chambers (tese do feature) ou se trunca como o /scan (tese oposta — nesse
 caso o gate falha e as Tasks 2+ devem ser revistas).
