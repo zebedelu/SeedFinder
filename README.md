@@ -178,7 +178,7 @@ SeedCracker runs on the **local API only** (`http://127.0.0.1:7890`, started wit
 
 ### SeedCrackerX 64-bit mode
 
-Modern Bedrock worlds use 64-bit world seeds, but the classic cracker above only searches the low 32 bits (the Mersenne-Twister structures). The 64-bit mode cracks the **full seed** (`0 ≤ seed < 2^63`, as the game stores it internally) by also exploiting Trail Ruins and Trial Chambers, whose placement RNG is Java-style and keyed on the whole 48-bit seed. It runs on the local API (`POST /seedcracker` JSON only); the browser WASM build has the export wired but is pending an emsdk rebuild + smoke confirmation.
+Modern Bedrock worlds use 64-bit world seeds, but the classic cracker above only searches the low 32 bits (the Mersenne-Twister structures). The 64-bit mode cracks the **full seed** (`0 ≤ seed < 2^63`, as the game stores it internally) by also exploiting Trail Ruins and Trial Chambers, whose placement RNG is Java-style and keyed on the whole 48-bit seed. It runs on the local API (`POST /seedcracker` JSON only) and in the browser WASM build (export `_seedfinder_crack64_shim`, smoke-tested green — rebuild via `wasm/build_wasm.bat`/`.sh`, verify with `node wasm/test_wasm.mjs`).
 
 **Requirements:** at least **one** Java-style anchor — Trail Ruins (`type` 23) or Trial Chambers (`type` 24) — passed under a separate **`java_structures`** key (sending them in `structures` is a 400); plus **1–24** regular MT structures under `mt_structures` (types 1–11, 13, 14, minus Mineshaft, which is never crackable). In practice, 4+ Java anchors are recommended: they are what shrink the 48-bit residual space, and 1–2 anchors can leave thousands of survivors for the cross-check.
 
