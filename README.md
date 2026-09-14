@@ -178,25 +178,25 @@ SeedCracker runs on the **local API only** (`http://127.0.0.1:7890`, started wit
 
 ### SeedCrackerX 64-bit mode
 
-Modern Bedrock worlds use 64-bit world seeds, but the classic cracker above only searches the low 32 bits (the Mersenne-Tister structures). The 64-bit mode cracks the **full seed** (`0 ≤ seed < 2^63`, as the game stores it internally) by also exploiting Trail Ruins and Trial Chambers, whose placement RNG is Java-style and keyed on the whole 48-bit seed. It runs on the local API (`POST /seedcracker` JSON only) and in the browser via the WASM build.
+Modern Bedrock worlds use 64-bit world seeds, but the classic cracker above only searches the low 32 bits (the Mersenne-Twister structures). The 64-bit mode cracks the **full seed** (`0 ≤ seed < 2^63`, as the game stores it internally) by also exploiting Trail Ruins and Trial Chambers, whose placement RNG is Java-style and keyed on the whole 48-bit seed. It runs on the local API (`POST /seedcracker` JSON only); the browser WASM build has the export wired but is pending an emsdk rebuild + smoke confirmation.
 
-**Requirements:** at least **one** Java-style anchor — Trail Ruins (`type` 23) or Trial Chambers (`type` 24) — passed in the `structures` list (the server routes them automatically); plus **1–24** regular MT structures (types 1–11, 13, 14, minus Mineshaft, which is never crackable). In practice, 4+ Java anchors are recommended: they are what shrink the 48-bit residual space, and 1–2 anchors can leave thousands of survivors for the cross-check.
+**Requirements:** at least **one** Java-style anchor — Trail Ruins (`type` 23) or Trial Chambers (`type` 24) — passed under a separate **`java_structures`** key (sending them in `structures` is a 400); plus **1–24** regular MT structures under `mt_structures` (types 1–11, 13, 14, minus Mineshaft, which is never crackable). In practice, 4+ Java anchors are recommended: they are what shrink the 48-bit residual space, and 1–2 anchors can leave thousands of survivors for the cross-check.
 
 **When to use it:** any world created after the 1.16.100-ish generation update, where the seed shown by tools like Chunkbase exceeds `2^32`. If you don't know the seed size, crack in 32-bit first — a `partial`/no-answer there is your hint to switch.
 
-**Window semantics (`start`/`end`):** the range now spans the 63-bit seed space. A span **below 2^48** only sweeps the 48-bit window induced by `start`/`end` (plus the ≤2^16 high-bit lift) — that's fast. The **full default range** (0 … 2^63) means the 2^48 sweep itself, roughly **hours on a single core** (≈ 3k× the 32-bit space); narrow the window or raise `max_seconds` accordingly. `end` above `2^32` on a plain 32-bit-looking request also auto-selects this mode (see the breaking-change note below).
+**Window semantics (`start`/`end`):** the range now spans the 63-bit seed space. A span **below 2^48** only sweeps the 48-bit window induced by `start`/`end` (plus the ≤2^16 high-bit lift) — that's fast. The **full default range** (0 … 2^63) means the 2^48 residual sweep itself — ≈**65,000× the 32-bit space**, i.e. days per core unparallelized — so use a narrow `start`/`end` window (span < 2^48) and 4+ Trial Chambers. `end` above `2^32` on a plain 32-bit-looking request also auto-selects this mode (see the breaking-change note below).
 
 | Scenario | Cost |
 |---|---|
 | Measured (local API): 4 Trial Chambers + 2 MT structures, window seed ± 2^24 (span 2^25) | **~1.0–1.4 s**, 6 threads, a **unique** candidate — exactly the real seed 4294972605 (Chunkbase data; full dataset in `docs/verification/bedrock64-empirical.md`) |
-| Same anchors, full 0…2^63 default range | 2^48 sweep ≈ hours/core — budget will return `partial` long before an answer |
+| Same anchors, full 0…2^63 default range | 2^48 sweep ≈ 65k× the 32-bit space — thousands of core-hours; budget will return `partial` long before an answer |
 
 **`seed` vs `seed_str`:** each candidate carries both. `seed` is a JSON number and **loses precision** for anything above 2^53 in JavaScript and most parsers; `seed_str` is the exact decimal string — use it as the identity of the candidate. The response envelope/header also gains `"bits": 64`, and matched structures are reported in **blocks** over the raw C/WASM ABI (the HTTP route converts them to chunks, same convention as 32-bit).
 
 ```bash
 curl -X POST http://127.0.0.1:7890/seedcracker \
   -H "Content-Type: application/json" \
-  -d '{"mode":"64","tolerance":6,"max_seconds":120,"start":4278195389,"end":4311749821,"structures":[{"type":4,"x":-280,"z":104},{"type":2,"x":2584,"z":-1288},{"type":24,"x":-505,"z":-281},{"type":24,"x":263,"z":-311},{"type":24,"x":-359,"z":199},{"type":24,"x":231,"z":169}]}'
+  -d '{"mode":"64","tolerance":6,"max_seconds":120,"start":4278195389,"end":4311749821,"mt_structures":[{"type":4,"x":-280,"z":104},{"type":2,"x":2584,"z":-1288}],"java_structures":[{"type":24,"x":-505,"z":-281},{"type":24,"x":263,"z":-311},{"type":24,"x":-359,"z":199},{"type":24,"x":231,"z":169}]}'
 ```
 
 ```json
@@ -206,8 +206,7 @@ curl -X POST http://127.0.0.1:7890/seedcracker \
 ]
 ```
 
-> **Breaking change note for clients:** the route **auto-detects 64-bit mode whenever `end` > 2^32** (or `"mode": "64"` is explicit). 32-bit clients that used to pass a large/absent-style upper bound beyond `2^32` will now get the 64-bit engine instead of a wrapped 32-bit sweep — pass `end ≤ 4294967296` to keep 32-bit behavior.
-
+> **Breaking change note for clients:** the route **auto-detects 64-bit mode whenever `end` > 2^32** (or `"mode": "64"` is explicit) — **POST JSON only; GET stays 32-bit**. 32-bit clients that used to pass a large/absent-style upper bound beyond `2^32` will now get the 64-bit engine instead of a wrapped 32-bit sweep — pass `end ≤ 4294967296` to keep 32-bit behavior.
 
 ## API reference
 
