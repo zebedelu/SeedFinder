@@ -31,6 +31,8 @@ typedef struct { uint64_t *v; int n, cap; } U64Vec;
 
 // Varre s48 in [s48Start, s48End) e coleta os que satisfazem TODAS as ancoras.
 // deadlineMs > 0 interrompe e devolve 1 (*timedOut = 1).
+// out: sweep48 RESETA o vetor (out->n = 0); sweep48MT faz APPEND sem resetar
+// (merge dos workers) — trocar as duas silenciosmente descartaria sobreviventes.
 int  anchor48Build(Anchor48 *a, const int *types, const double *xb, const double *zb,
                    int n, int tolerance);             // 0 ok / -1 erro
 void sweep48(const Anchor48 *a, uint64_t s48Start, uint64_t s48End,

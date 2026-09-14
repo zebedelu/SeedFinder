@@ -245,12 +245,14 @@ def _run64(structures, java_structures, tolerance, units, opts):
         "checked": data.get("checked", 0), "elapsed_ms": elapsed,
         "timed_out": timed_out, "threads": data.get("threads", threads),
     }
-    # C emits matches in blocks; the 32-bit route answers in chunks - floor
-    # division keeps negatives on the right side of the chunk grid.
+    # C emits matches in blocks; convert to chunks with the same
+    # (block - 8) >> 4 center convention as the 32-bit crack: MT centers sit
+    # at 8 mod 16 so the offset is a no-op for them, while Java-style anchors
+    # return exact corner blocks (16k) and would land 1 chunk high otherwise.
     results = []
     for cand in data.get("results", []):
         cand = dict(cand)
-        cand["matches"] = [[x // 16, z // 16] for x, z in cand["matches"]]
+        cand["matches"] = [[(x - 8) // 16, (z - 8) // 16] for x, z in cand["matches"]]
         results.append(cand)
     return [head] + results
 

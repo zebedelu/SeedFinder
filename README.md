@@ -184,14 +184,14 @@ Modern Bedrock worlds use 64-bit world seeds, but the classic cracker above only
 
 **When to use it:** any world created after the 1.16.100-ish generation update, where the seed shown by tools like Chunkbase exceeds `2^32`. If you don't know the seed size, crack in 32-bit first — a `partial`/no-answer there is your hint to switch.
 
-**Window semantics (`start`/`end`):** the range now spans the 63-bit seed space. A span **below 2^48** only sweeps the 48-bit window induced by `start`/`end` (plus the ≤2^16 high-bit lift) — that's fast. The **full default range** (0 … 2^63) means the 2^48 residual sweep itself — ≈**65,000× the 32-bit space**, i.e. days per core unparallelized — so use a narrow `start`/`end` window (span < 2^48) and 4+ Trial Chambers. `end` above `2^32` on a plain 32-bit-looking request also auto-selects this mode (see the breaking-change note below).
+**Window semantics (`start`/`end`):** the range now spans the 63-bit seed space. A span **below 2^48** only sweeps the 48-bit window induced by `start`/`end` (plus the ≤2^16 high-bit lift) — that's fast. The **full default range** (0 … 2^63) means the 2^48 residual sweep itself — ≈**65,000× the 32-bit space**, i.e. **thousands of core-hours per core unparallelized** (measured ≈4M s48/core-second on this branch → 2^48 ≈ 8×10^7 s) — so use a narrow `start`/`end` window (span < 2^48) and 4+ Trial Chambers. `end` above `2^32` on a plain 32-bit-looking request also auto-selects this mode (see the breaking-change note below).
 
 | Scenario | Cost |
 |---|---|
 | Measured (local API): 4 Trial Chambers + 2 MT structures, window seed ± 2^24 (span 2^25) | **~1.0–1.4 s**, 6 threads, a **unique** candidate — exactly the real seed 4294972605 (Chunkbase data; full dataset in `docs/verification/bedrock64-empirical.md`) |
-| Same anchors, full 0…2^63 default range | 2^48 sweep ≈ 65k× the 32-bit space — thousands of core-hours; budget will return `partial` long before an answer |
+| Same anchors, full 0…2^63 default range | 2^48 sweep ≈ 65k× the 32-bit space — thousands of core-hours; a budget exhausted **during the sweep** returns `error` ("2^48 sweep exceeded budget …"), not `partial` — `partial` only occurs when the budget runs out during the later high-bit lift stage |
 
-**`seed` vs `seed_str`:** each candidate carries both. `seed` is a JSON number and **loses precision** for anything above 2^53 in JavaScript and most parsers; `seed_str` is the exact decimal string — use it as the identity of the candidate. The response envelope/header also gains `"bits": 64`, and matched structures are reported in **blocks** over the raw C/WASM ABI (the HTTP route converts them to chunks, same convention as 32-bit).
+**`seed` vs `seed_str`:** each candidate carries both. `seed` is a JSON number and **loses precision** for anything above 2^53 in JavaScript and most parsers; `seed_str` is the exact decimal string — use it as the identity of the candidate. The response envelope/header also gains `"bits": 64`, and matched structures are reported in **blocks** over the raw C/WASM ABI (the HTTP route converts them to chunks, same convention as 32-bit). In 64-bit mode `checked` counts the **swept 48-bit residual candidates**, not lifted 64-bit seeds — for a non-wrapping window with span < 2^48 it equals that span exactly (2^25 = 33,554,432 in the example below).
 
 ```bash
 curl -X POST http://127.0.0.1:7890/seedcracker \
@@ -201,8 +201,8 @@ curl -X POST http://127.0.0.1:7890/seedcracker \
 
 ```json
 [
-  { "status": "ok", "message": "crack completed", "structures": 6, "tolerance": 6, "units": "blocks", "bits": 64, "checked": 33554432, "elapsed_ms": 1419, "timed_out": false, "threads": 6 },
-  { "seed": 4294972605, "seed_str": "4294972605", "score": 0, "matches": [[-18, 6], [161, -81], [-31, -17], [17, -20], [-23, 13], [15, 10]] }
+  { "status": "ok", "message": "crack completed", "structures": 6, "tolerance": 6, "units": "blocks", "bits": 64, "checked": 33554432, "elapsed_ms": 1427, "timed_out": false, "threads": 6 },
+  { "seed": 4294972605, "seed_str": "4294972605", "score": 0, "matches": [[-18, 6], [161, -81], [-32, -18], [16, -21], [-24, 12], [14, 9]] }
 ]
 ```
 

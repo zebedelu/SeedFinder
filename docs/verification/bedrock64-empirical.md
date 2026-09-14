@@ -47,7 +47,7 @@ mas registrar para investigação futura.
 
 \** **Trial Chambers**: divergência **esperada e esclarecedora** — o
 `seedfinder_scan` atual trunca o seed para 32 bits (`seed & 0xFFFFFFFF` em
-`core/seedfinder_wrapper.c:88`) antes de chamar o placement Java-style, então ele
+`core/seedfinder_wrapper.c:90`) antes de chamar o placement Java-style, então ele
 calcula as posições com seed 5309, não com 4294972605. Alimentando o seed
 48-bit completo direto em `getStructurePos(Trial_Chambers, MC_NEWEST, 4294972605, …)`
 (probe `probe_tc.c`), os 4 pontos do Chunkbase aparecem todos a ≈13 blocos
