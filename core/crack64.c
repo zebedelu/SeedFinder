@@ -41,23 +41,6 @@ void javaChunk(const JavaCfg *c, uint64_t s48, int regX, int regZ,
     *chunkZ = (long long)regZ * c->regionSize + oz - 1;
 }
 
-static void u64Push(U64Vec *v, uint64_t x) {
-    assert(v->n <= v->cap); // invariante do vetor (n<cap => ha' folga; n==cap => cresce)
-    if (v->n == v->cap) {
-        int newCap = v->cap ? v->cap * 2 : 256;
-        uint64_t *nv = realloc(v->v, (size_t)newCap * sizeof(uint64_t));
-        // Cinto de seguranca: se realloc falhar, nao perder o buffer antigo nem
-        // escrever em NULL. Nao-liberar na falha deixa vazamento intencional —
-        // melhor que corromper (o chamador so acumula candidatos; janela gigante
-        // e' evitada pelos clamps do caller, Task 5).
-        assert(nv && "u64Push: realloc falhou");
-        if (!nv) return;
-        v->v = nv;
-        v->cap = newCap;
-    }
-    v->v[v->n++] = x;
-}
-
 int anchor48Build(Anchor48 *a, const int *types, const double *xb, const double *zb,
                   int n, int tolerance) {
     if (n < 1 || n > C64_MAX) return -1;
@@ -196,8 +179,6 @@ Sweep48Result sweep48MT(const Anchor48 *a, uint64_t start, uint64_t end,
 //   placement verdadeiro mais distante (mesma preferencia do loop de
 //   validacao final do crack de 32 bits, seedfinder_wrapper.c:666-686).
 
-#define C64_MAXREGS 64
-
 #ifdef C64_TRACE
 /* gcc -DC64_TRACE ... => timing por estagio no stderr (diagnostico local;
  * codigo zero quando nao definido). */
@@ -209,14 +190,6 @@ static double g_trMs;
 #define TR0()        ((void)0)
 #define TR_STAGE(s)  ((void)0)
 #endif
-
-typedef struct {
-    int       type;
-    long long chunkX, chunkZ;
-    int       maxD2;
-    int       nReg;
-    int       regX[C64_MAXREGS], regZ[C64_MAXREGS];
-} MtTarget;
 
 // Matches por hit: (nMt + nJava) pares de blocos, em ordem de entrada
 // (MTs primeiro, depois Java-style) — 4*C64_MAX ints de folga.
@@ -232,7 +205,7 @@ static void c64SwapJavaRow(Anchor48 *a, int i, int j) {
     long long v = a->chunkX[i]; a->chunkX[i] = a->chunkX[j]; a->chunkX[j] = v;
     v = a->chunkZ[i]; a->chunkZ[i] = a->chunkZ[j]; a->chunkZ[j] = v;
     int k = a->nRegions[i]; a->nRegions[i] = a->nRegions[j]; a->nRegions[j] = k;
-    int tmp[C64_MAXREGS];
+    int tmp[CRACK_MAX_REGIONS];
     memcpy(tmp, a->regX[i], sizeof tmp);
     memcpy(a->regX[i], a->regX[j], sizeof tmp);
     memcpy(a->regX[j], tmp, sizeof tmp);
@@ -259,7 +232,7 @@ char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mt
 
     /* --- Estagio 1: alvos ------------------------------------------------ */
     int maxD2 = tolerance * tolerance;
-    MtTarget mt[C64_MAX];
+    CrackTarget mt[C64_MAX];
     for (int i = 0; i < nMt; i++) {
         int t = mtTypes[i];
         if (t == Mineshaft)
@@ -275,7 +248,7 @@ char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mt
             cz < -100000000LL || cz > 100000000LL)
             return strdup("{\"error\":\"coordinates out of range\"}");
         int rs = sc.regionSize;
-        mt[i].type = t; mt[i].maxD2 = maxD2; mt[i].nReg = 0;
+        mt[i].type = t; mt[i].maxD2 = maxD2; mt[i].numRegions = 0;
         mt[i].chunkX = cx; mt[i].chunkZ = cz;
         // celulas candidatas: mesma formula floor-div do seedfinder_crack/anchor48Build
         long long lox = (cx - tolerance - (rs - 1)) / rs;
@@ -285,11 +258,11 @@ char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mt
         long long hiz = (cz + tolerance >= 0) ? (cz + tolerance) / rs
                                               : (cz + tolerance - (rs - 1)) / rs;
         int k = 0;
-        for (long long x = lox; x <= hix && k < C64_MAXREGS; x++)
-            for (long long z = loz; z <= hiz && k < C64_MAXREGS; z++)
+        for (long long x = lox; x <= hix && k < CRACK_MAX_REGIONS; x++)
+            for (long long z = loz; z <= hiz && k < CRACK_MAX_REGIONS; z++)
                 { mt[i].regX[k] = (int)x; mt[i].regZ[k] = (int)z; k++; }
         if (k == 0) return strdup("{\"error\":\"invalid coordinates\"}");
-        mt[i].nReg = k;
+        mt[i].numRegions = k;
     }
     for (int i = 0; i < nJava; i++) {
         long long cx = c64FloorChunk(jX[i]), cz = c64FloorChunk(jZ[i]);
@@ -313,12 +286,12 @@ char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mt
             int o = jOrder[i]; jOrder[i] = jOrder[best]; jOrder[best] = o;
         }
     }
-    const MtTarget *mOrd[C64_MAX]; // idem para o cruzamento MT
+    const CrackTarget *mOrd[C64_MAX]; // idem para o cruzamento MT
     for (int i = 0; i < nMt; i++) mOrd[i] = &mt[i];
     for (int i = 1; i < nMt; i++) {
-        const MtTarget *key = mOrd[i];
+        const CrackTarget *key = mOrd[i];
         int j = i - 1;
-        while (j >= 0 && mOrd[j]->nReg > key->nReg) { mOrd[j + 1] = mOrd[j]; j--; }
+        while (j >= 0 && mOrd[j]->numRegions > key->numRegions) { mOrd[j + 1] = mOrd[j]; j--; }
         mOrd[j + 1] = key;
     }
 
@@ -388,18 +361,18 @@ char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mt
         int nCand[C64_MAX];
         int ok = 1;
         for (int m = 0; m < nMt && ok; m++) {
-            const MtTarget *t = mOrd[m];
+            const CrackTarget *t = mOrd[m];
             int k = (int)(t - mt);
             // celulas in-tolerance desta ancora
             C64Cand *list = candStore[k];
             int cap = 4;
-            if (t->nReg > cap) {                       // caminho raro (>4 celulas)
-                cap = t->nReg;
+            if (t->numRegions > cap) {                   // caminho raro (>4 celulas)
+                cap = t->numRegions;
                 list = malloc((size_t)cap * sizeof(C64Cand));
                 if (!list) { ok = 0; break; }
             }
             int cnt = 0;
-            for (int r = 0; r < t->nReg; r++) {
+            for (int r = 0; r < t->numRegions; r++) {
                 Pos pos;
                 if (!getBedrockStructurePos(t->type, MC_NEWEST, s32,
                                             t->regX[r], t->regZ[r], &pos))

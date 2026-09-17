@@ -1,6 +1,7 @@
 #ifndef SEEDFINDER_CRACK64_H_
 #define SEEDFINDER_CRACK64_H_
 #include <stdint.h>
+#include "crack_mt.h"
 #include "ChunkBiomesGUI/cubiomes/finders.h"
 #include "ChunkBiomesGUI/cubiomes/generator.h"
 
@@ -26,8 +27,6 @@ typedef struct {
     int       nRegions[C64_MAX];
     int       regX[C64_MAX][64], regZ[C64_MAX][64];   // celulas candidatas (mesma formula do crack 32)
 } Anchor48;
-
-typedef struct { uint64_t *v; int n, cap; } U64Vec;
 
 // Varre s48 in [s48Start, s48End) e coleta os que satisfazem TODAS as ancoras.
 // deadlineMs > 0 interrompe e devolve 1 (*timedOut = 1).

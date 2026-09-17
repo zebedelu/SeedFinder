@@ -6,6 +6,7 @@
 // do pipeline crack64; SEEDFINDER_API e' macro vazio sem SEEDFINDER_BRIDGE_SHARED).
 // Esperado: imprime PARITY_OK e sai 0.
 #include "crack64.h"
+#include "crack_mt.h"
 #include "ChunkBiomesGUI/Bfinders.h"
 #include "ChunkBiomesGUI/cubiomes/finders.h"
 #include <stdio.h>
@@ -232,6 +233,38 @@ static int testCrack64Viable(void) {
     printf("CRACK64_VIABLE_OK\n"); return 0;
 }
 
+static int testSweepMtSurvivorsRange(void) {
+    const uint64_t FULL = 7777777777777777777ULL;
+    const uint32_t lo32 = (uint32_t)(FULL & 0xFFFFFFFFULL);
+    const int TYPES[3] = { Igloo, Jungle_Pyramid, Swamp_Hut };
+    const long long CELLS[3][2] = { {2, -3}, {-1, 4}, {3, 2} };
+    CrackTarget t[3];
+    for (int i = 0; i < 3; i++) {
+        StructureConfig sc;
+        assert(getBedrockStructureConfig(TYPES[i], MC_NEWEST, &sc));
+        Pos q;
+        assert(getBedrockStructurePos(TYPES[i], MC_NEWEST, lo32,
+                                      (int)CELLS[i][0], (int)CELLS[i][1], &q));
+        t[i].type = TYPES[i];
+        t[i].chunkX = ((long long)q.x - 8) >> 4;
+        t[i].chunkZ = ((long long)q.z - 8) >> 4;
+        t[i].maxD2 = 0;
+        t[i].numRegions = 1;
+        t[i].regX[0] = (int)CELLS[i][0];
+        t[i].regZ[0] = (int)CELLS[i][1];
+    }
+    U64Vec out = {0};
+    uint64_t lo = (uint64_t)lo32 - (1ULL << 19);
+    MtSweepResult r = sweepMtSurvivors(t, 3, lo, lo + (1ULL << 20), 120.0, 4, &out);
+    int found = 0;
+    for (int i = 0; i < out.n; i++) if (out.v[i] == (uint64_t)lo32) found = 1;
+    assert(found); assert(!r.timedOut); assert(r.threads == 4);
+    assert(r.checked == (1ULL << 20)); // cobertura exata da particao
+    free(out.v);
+    printf("SWEEP_MT_SURVIVORS_OK\n");
+    return 0;
+}
+
 int main(void) {
     if (testParity()) return 1;
     if (testSweep()) return 1;
@@ -239,5 +272,6 @@ int main(void) {
     if (testSweepMTRemainder()) return 1;
     if (testSweepMTTimeout()) return 1;
     if (testCrack64()) return 1;
+    if (testSweepMtSurvivorsRange()) return 1;
     return testCrack64Viable();
 }
