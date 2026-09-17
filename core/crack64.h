@@ -44,6 +44,12 @@ typedef struct { uint64_t checked; int timedOut, threads; } Sweep48Result;
 Sweep48Result sweep48MT(const Anchor48 *a, uint64_t start, uint64_t end,
                         double budgetSec, int numThreads, U64Vec *out);
 
+// Stage B do pipeline full-range: para cada lo32 sobrevivente, testa os 2^16
+// hi16 e aceita s48 = (hi16<<32)|lo32 quando TODAS as ancoras Java casam.
+// deadline = ms absoluto (0.0 = sem deadline); *timedOut = 1 se estourar.
+void liftJavaHi(const Anchor48 *anc, const U64Vec *lo32s,
+                double deadline, U64Vec *out, int *timedOut);
+
 // Crack de seed completa Bedrock (0 <= seed < 2^63): varre o residual de 48
 // bits com as ancoras Java-style (Trail Ruins/Trial Chambers), cruza com o
 // placement MT (mod 2^32) das estruturas Bedrock e levanta os 16 bits altos

@@ -265,6 +265,25 @@ static int testSweepMtSurvivorsRange(void) {
     return 0;
 }
 
+static int testLiftJavaHi(void) {
+    const uint64_t FULL = 7777777777777777777ULL;
+    Anchor48 a = mkAnchors(FULL, 0);
+    assert(a.nJava >= 2 && "fixture precisa de multiplas ancoras");
+    U64Vec lo = {0};
+    u64Push(&lo, FULL & 0xFFFFFFFFULL);
+    u64Push(&lo, (FULL & 0xFFFFFFFFULL) + 1);
+    u64Push(&lo, (FULL & 0xFFFFFFFFULL) + 1000);
+    u64Push(&lo, (FULL & 0xFFFFFFFFULL) + 0x10000);
+    U64Vec out = {0}; int to = 0;
+    liftJavaHi(&a, &lo, 0.0, &out, &to);
+    int found = 0;
+    for (int i = 0; i < out.n; i++) if (out.v[i] == (FULL & C64_M48)) found = 1;
+    assert(found); assert(!to);
+    free(lo.v); free(out.v);
+    printf("LIFT_JAVA_HI_OK\n");
+    return 0;
+}
+
 int main(void) {
     if (testParity()) return 1;
     if (testSweep()) return 1;
@@ -273,5 +292,6 @@ int main(void) {
     if (testSweepMTTimeout()) return 1;
     if (testCrack64()) return 1;
     if (testSweepMtSurvivorsRange()) return 1;
+    if (testLiftJavaHi()) return 1;
     return testCrack64Viable();
 }

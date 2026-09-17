@@ -158,6 +158,26 @@ Sweep48Result sweep48MT(const Anchor48 *a, uint64_t start, uint64_t end,
     return r;
 }
 
+void liftJavaHi(const Anchor48 *anc, const U64Vec *lo32s,
+                double deadline, U64Vec *out, int *timedOut) {
+    *timedOut = 0;
+    out->n = 0;
+    uint64_t probes = 0;
+    for (int i = 0; i < lo32s->n; i++) {
+        uint64_t lo32 = lo32s->v[i];
+        for (uint64_t hi16 = 0; hi16 < (1ULL << 16); hi16++) {
+            uint64_t s48 = ((uint64_t)hi16 << 32) | lo32;
+            int ok = 1;
+            for (int j = 0; j < anc->nJava && ok; j++) ok = anchorHit(anc, j, s48);
+            if (ok) u64Push(out, s48);
+            probes++;
+            if ((probes & 0xFFFFF) == 0 && deadline > 0.0 && nowms_s() > deadline) {
+                *timedOut = 1; return;
+            }
+        }
+    }
+}
+
 // --- pipeline de seed completa (Task 6) -----------------------------------
 // Estagio 1: ancora Java + alvos MT (celulas de regiao pre-computadas uma vez,
 // espelhando CrackTarget do crack de 32 bits).
