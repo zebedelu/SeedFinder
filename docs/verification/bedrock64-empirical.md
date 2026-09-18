@@ -116,3 +116,72 @@ crack64 recupera a seed de campo 4294972605 via rota HTTP com candidato único
 mundo com seed 4294972605; (b) confirmar se o jogo usa os bits 32–47 para as
 trial chambers (tese do feature) ou se trunca como o /scan (tese oposta — nesse
 caso o gate falha e as Tasks 2+ devem ser revistas).
+
+---
+
+## Adendo 2026-09-17 — full-range (span ≥ 2³²): medições e guards
+
+Máquina de referência: **i3-1305U (5 cores / 6 threads lógicos)**, Windows,
+MSYS2 UCRT64, `-O3`. Probes descartáveis em `build_server/`:
+`probe_order.c` (ordering), `probe_c3.c` (stage A), `probe_viable.c`
+(viabilidade), `probe_lift_yield.c` (yield Java), **`probe_tol.c`** (tabela
+tol → s48 → custo).
+
+### Ganhos de performance (stage A, 8 MT, tol 6)
+
+| Mudança | Efeito medido |
+|---|---|
+| Alvos MT ordenados por `numRegions` antes do sweep (early-exit do `crackScore4`) | **1,9×** (1,55M → 2,96M seeds/s), conjunto de sobreviventes idêntico |
+| SIMD alargado de 4 → 8 lanes (`crack_mt8_block`; as lanes 4–7 do `__m256i` ficavam zeradas) | **2,23×** (3,24M → 7,23M seeds/s), survivors idênticos |
+| `core/CMakeLists.txt` → Release (antes o cache ficava com `CMAKE_BUILD_TYPE` vazio ⇒ DLL em `-O0`) | ~6× no crack 32-bit (2,8M → 17M seeds/s) |
+| `liftJavaHi` paralelizado por sobrevivente lo32 (WASM: 1 thread inline) | 1T vs 8T: mesmo conjunto (asserção em `testLiftJavaHi`) |
+
+Stage A full-range (2³², 8 MT tol 6, 6 threads): **~403 s** (~7 min).
+
+### O gargalo real: stage 4 (lift de bioma dos 16 bits altos)
+
+Custo = `#s48 × 2^16 × ~150 µs` (`applySeed` + `structureIsViable`; medido
+103–210 µs/seed). O stage 3 (cross MT) **não filtra nada no full-range** — todo
+lo32 sobrevivente já passou pelo filtro MT do stage A — então o stage 4 roda
+para o yield inteiro do lift Java:
+
+| tolerance (Java, 4 TCs) | s48 por lo32 | s48 total (2³²) | stage 4, 6 threads |
+|---|---|---|---|
+| 0 | 0 (não casa) | 0 | — (0 candidatos) |
+| 2 | 68 | 2 176 | ~1,0 h |
+| 3 | 621 | 19 872 | ~9,4 h |
+| 4 | 1 134 | 72 576 | ~46 h |
+| 6 | 3 391 | 95 400 000 | **~3,4 anos** |
+
+Ou seja: **full-range só é viável com âncoras Java praticamente exatas**. Com
+`tolerance: 6` (dados Chunkbase) o run de aceite anterior levou os 2 400 s de
+budget e cobriu ~0,05% do trabalho — não era "travamento", era custo real.
+
+### Guards implementados (`seedfinder_crack64`, ramo full-range)
+
+1. **Pré-check do yield Java**: amostra ≤ 32 sobreviventes lo32, extrapola
+   `s48_total` e estima o stage 4; se estourar o budget restante, devolve na
+   hora `{"error": "... pass a start/end window ... or exact Trial Chambers/Trail
+   Ruins coordinates"}` (evita também materializar centenas de MB de s48).
+2. **Pós-lift**: mesma estimativa sobre `s48s.n` real (defesa contra subestimação
+   da amostra).
+3. **Pré-check MT** (substitui o `mtFilterBits` analítico, que errava por basear-se
+   em `regionSize`): sweep amostral de 2²² sementes sobre `sweepMtSurvivors`,
+   extrapolação ×1024 contra o gate exato de 2²⁰.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `core/test_crack64.c` rápido (paridade, sweeps, lift, pré-checks) | verde |
+| `core/test_crack64.c` full-range (`SEEDFINDER_FULL_RANGE_TEST=1`) | **`FULL_RANGE_OK`** — recupera `7777777777777777777` com âncoras Java exatas (tol 0) |
+| `server/tests/test_crack64_api.py::test_recovers_real_seed` | verde (bounded ±2²⁴, ~1 s, seed de campo) |
+| `server/tests/test_crack64_api.py::test_full_range_guard` (`SEEDFINDER_FULL_RANGE_TEST=1`) | **`FULL_RANGE_GUARD_OK`** — erro acionável com coords aproximadas |
+| `node wasm/test_wasm.mjs` (após adicionar `core/crack_mt.c` ao `wasm/CMakeLists.txt`) | `ALL WASM TESTS PASSED` (parity + crack64 ±2²⁴ + benchmark 876k seeds/s) |
+
+**Lição do teste C full-range:** os anchors sintéticos precisam ser
+**biome-viáveis** na seed verdadeira (`structureIsViable` no stage 4), senão o
+pipeline descarta corretamente o próprio seed-alvo — o teste original era
+impossível de passar (Jungle Pyramid e Swamp Hut não eram viáveis nas células
+escolhidas). O teste agora caça a primeira célula viável por tipo (`±64`).
+
