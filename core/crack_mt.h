@@ -34,9 +34,9 @@ extern int crack_g_avx2;
 void      crackDetectAvx2(void);            /* preenche crack_g_avx2 */
 
 #if SEEDFINDER_SIMD
-void crack_mt4_block(const uint32_t seedlo[4], uint32_t cbase, uint32_t out[4][8]);
-int  crackScore4(const CrackTarget *targets, int nTargets,
-                 const uint64_t seeds[4], int64_t score[4]);
+void crack_mt8_block(const uint32_t seedlo[8], uint32_t cbase, uint32_t out[4][8]);
+int  crackScore8(const CrackTarget *targets, int nTargets,
+                 const uint64_t seeds[8], int64_t score[8]);
 #endif
 
 typedef struct { uint64_t checked; int timedOut, threads; } MtSweepResult;

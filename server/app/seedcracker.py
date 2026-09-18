@@ -26,6 +26,10 @@ COORD_LIMIT = 1_000_000_000
 MAX_RESULTS_CAP = 2000
 DEFAULT_MAX_SECONDS = 30.0
 MAX_MAX_SECONDS = 120.0
+# O modo 64 full-range varre 2^32 seeds no stage A (~25 min no nativo -O2), muito
+# acima do teto do modo 32-bit. ponytail: teto unico e' o gate do Vercel/runtime;
+# apertar por-usuario se virar abuso.
+MAX_MAX_SECONDS_64 = 2400.0
 
 STRUCTURE_NAMES = {
     1: "Desert Pyramid", 2: "Jungle Temple", 3: "Swamp Hut", 4: "Igloo",
@@ -221,7 +225,7 @@ def _run64(structures, java_structures, tolerance, units, opts):
     end = int(opts.get("end", 1 << 63)) % (1 << 64)
     max_results = min(int(opts.get("max", 500)), MAX_RESULTS_CAP)
     budget = float(opts.get("max_seconds", DEFAULT_MAX_SECONDS))
-    budget = max(1.0, min(budget, MAX_MAX_SECONDS))
+    budget = max(1.0, min(budget, MAX_MAX_SECONDS_64))
     threads = max(1, min(os.cpu_count() or 4, 64))
     ptr = native.lib.seedfinder_crack64_shim(
         mt_types, mt_xs, mt_zs, n_mt, j_types, j_xs, j_zs, n_j,

@@ -72,6 +72,43 @@ def test_recovers_real_seed():
     assert FIX["seed"] in seeds, f"seed real {FIX['seed']} ausente: {seeds[:20]}"
 
 
+def test_full_range_guard():
+    # Guard de viabilidade do full-range (0..2^63, SEM janela). Opt-in (~7 min:
+    # o stage A varre 2^32): rode com SEEDFINDER_FULL_RANGE_TEST=1.
+    #
+    # Com coordenadas APROXIMADAS (tolerance 6, dados Chunkbase) o full-range e'
+    # INVIAVEL: o stage 4 faz 2^16 lifts de bioma por candidato s48 a ~150 us
+    # (applySeed + gate), e tol 6 gera milhoes de s48 -> anos. Medido em
+    # build_server/probe_tol.c: tol 2 -> 1 h; tol 6 -> ~3,4 anos (6 threads).
+    # O guard estima isso com uma amostra e devolve erro ACIONAVEL na hora, em
+    # vez de pendurar. A recuperacao full-range com ancoras Java EXATAS (tol 0)
+    # e' provada por core/test_crack64.c (FULL_RANGE_OK), onde o lift gera ~1 s48.
+    if not os.environ.get("SEEDFINDER_FULL_RANGE_TEST"):
+        print("FULL_RANGE_SKIPPED (set SEEDFINDER_FULL_RANGE_TEST=1)")
+        return
+    mt = [
+        {"type": 1, "x": -3048, "z": -296},      # Desert Temple
+        {"type": 4, "x": -280, "z": 104},        # Igloo
+        {"type": 2, "x": 2584, "z": -1288},      # Jungle Pyramid
+        {"type": 3, "x": 2136, "z": -280},       # Witch Hut
+        {"type": 5, "x": 296, "z": 232},         # Snowy Village
+        {"type": 5, "x": 1368, "z": -392},       # Plains Village
+        {"type": 5, "x": 1256, "z": -5816},      # Savanna Village
+        {"type": 5, "x": -9128, "z": -13352},    # Desert Village
+    ]
+    r = client.post("/seedcracker", json={
+        "mode": "64", "tolerance": FIX["tolerance"], "max_seconds": 2400,
+        "mt_structures": mt,
+        "java_structures": FIX["java_structures"]})
+    body = r.get_json()
+    assert r.status_code == 200, (r.status_code, body)
+    head = body[0]
+    assert head["status"] == "error", f"guard deve reprovar coords aproximadas: {head}"
+    msg = head["message"].lower()
+    assert "infeasible" in msg or "window" in msg, head
+    print("FULL_RANGE_GUARD_OK")
+
+
 def main():
     fns = [v for k, v in sorted(globals().items())
            if k.startswith("test_") and callable(v)]

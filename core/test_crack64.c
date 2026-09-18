@@ -1,7 +1,7 @@
 // core/test_crack64.c — paridade do fast-path vs cubiomes getStructurePos.
 //
 // Build & run (Windows, MSYS2 UCRT64; a partir de build_server/):
-//   & "C:\Program Files\Git\bin\bash.exe" -lc "cd build_server && /c/msys64/ucrt64/bin/gcc.exe -std=c11 -I.. -I../ChunkBiomesGUI -I../ChunkBiomesGUI/cubiomes ../core/test_crack64.c ../core/crack64.c ../core/seedfinder_wrapper.c ../ChunkBiomesGUI/Bfinders.c ../ChunkBiomesGUI/cubiomes/biomes.c ../ChunkBiomesGUI/cubiomes/layers.c ../ChunkBiomesGUI/cubiomes/generator.c ../ChunkBiomesGUI/cubiomes/finders.c ../ChunkBiomesGUI/cubiomes/util.c ../ChunkBiomesGUI/cubiomes/noise.c ../ChunkBiomesGUI/cubiomes/biomenoise.c ../ChunkBiomesGUI/cubiomes/quadbase.c -lm -o test_crack64 && ./test_crack64"
+//   & "C:\Program Files\Git\bin\bash.exe" -lc "cd build_server && /c/msys64/ucrt64/bin/gcc.exe -O2 -std=c11 -I.. -I../ChunkBiomesGUI -I../ChunkBiomesGUI/cubiomes ../core/test_crack64.c ../core/crack64.c ../core/crack_mt.c ../core/seedfinder_wrapper.c ../ChunkBiomesGUI/Bfinders.c ../ChunkBiomesGUI/cubiomes/biomes.c ../ChunkBiomesGUI/cubiomes/layers.c ../ChunkBiomesGUI/cubiomes/generator.c ../ChunkBiomesGUI/cubiomes/finders.c ../ChunkBiomesGUI/cubiomes/util.c ../ChunkBiomesGUI/cubiomes/noise.c ../ChunkBiomesGUI/cubiomes/biomenoise.c ../ChunkBiomesGUI/cubiomes/quadbase.c -lm -o test_crack64 && ./test_crack64"
 // seedfinder_wrapper.c entra no link pela Task 6 (structureIsViable compartilhada
 // do pipeline crack64; SEEDFINDER_API e' macro vazio sem SEEDFINDER_BRIDGE_SHARED).
 // Esperado: imprime PARITY_OK e sai 0.
@@ -275,12 +275,108 @@ static int testLiftJavaHi(void) {
     u64Push(&lo, (FULL & 0xFFFFFFFFULL) + 1000);
     u64Push(&lo, (FULL & 0xFFFFFFFFULL) + 0x10000);
     U64Vec out = {0}; int to = 0;
-    liftJavaHi(&a, &lo, 0.0, &out, &to);
+    liftJavaHi(&a, &lo, 0.0, 8, &out, &to);
     int found = 0;
     for (int i = 0; i < out.n; i++) if (out.v[i] == (FULL & C64_M48)) found = 1;
     assert(found); assert(!to);
     free(lo.v); free(out.v);
     printf("LIFT_JAVA_HI_OK\n");
+
+    // Mesma chamada com 1 thread (caminho WASM/inline) deve achar o mesmo s48.
+    U64Vec lo1 = {0};
+    u64Push(&lo1, FULL & 0xFFFFFFFFULL);
+    u64Push(&lo1, (FULL & 0xFFFFFFFFULL) + 1);
+    u64Push(&lo1, (FULL & 0xFFFFFFFFULL) + 1000);
+    u64Push(&lo1, (FULL & 0xFFFFFFFFULL) + 0x10000);
+    U64Vec out1 = {0}; int to1 = 0;
+    liftJavaHi(&a, &lo1, 0.0, 1, &out1, &to1);
+    int found1 = 0;
+    for (int i = 0; i < out1.n; i++) if (out1.v[i] == (FULL & C64_M48)) found1 = 1;
+    assert(found1); assert(!to1);
+    assert(out1.n == out.n);   // particionamento nao pode mudar o conjunto
+    free(lo1.v); free(out1.v);
+    printf("LIFT_JAVA_HI_1T_OK\n");
+    return 0;
+}
+
+static int testFullRangePrecheck(void) {
+    // Pre-check amostral do full-range (2^22 seeds, ~1s):
+    //  4 MT (filtro fraco) -> reprova com "needs more MT structures".
+    //  8 MT (filtro forte) + budget 8s -> passa o pre-check e morre no budget do
+    //  stage A (erro diferente), provando que o pre-check nao bloqueou.
+    int jT[1] = { Trial_Chambers };
+    Pos jp; assert(getStructurePos(Trial_Chambers, MC_NEWEST, 4294972605ULL, 0, 0, &jp));
+    double jX[1] = { (double)((jp.x - 8) >> 4) * 16 };
+    double jZ[1] = { (double)((jp.z - 8) >> 4) * 16 };
+
+    int mT4[4] = { Desert_Pyramid, Igloo, Jungle_Pyramid, Swamp_Hut };
+    double x4[4] = { -3048, -280, 2584, 2136 };
+    double z4[4] = { -296, 104, -1288, -280 };
+    char *j = seedfinder_crack64(mT4, x4, z4, 4, jT, jX, jZ, 1, 6, 0, 1ULL << 63,
+                                 500, 60.0, 8);
+    assert(j);
+    int ok = strstr(j, "needs more MT structures") != NULL;
+    if (!ok) fprintf(stderr, "PRECHECK FAIL 4MT: %s\n", j);
+    free(j);
+    assert(ok);
+    printf("FULL_RANGE_PRECHECK_REJECT_OK\n");
+
+    int mT8[8] = { Desert_Pyramid, Igloo, Jungle_Pyramid, Swamp_Hut,
+                   Village, Village, Village, Village };
+    double x8[8] = { -3048, -280, 2584, 2136, 296, 1368, 1256, -9128 };
+    double z8[8] = { -296, 104, -1288, -280, 232, -392, -5816, -13352 };
+    j = seedfinder_crack64(mT8, x8, z8, 8, jT, jX, jZ, 1, 6, 0, 1ULL << 63,
+                           500, 8.0, 8);
+    assert(j);
+    ok = strstr(j, "needs more MT structures") == NULL;
+    if (!ok) fprintf(stderr, "PRECHECK FAIL 8MT: %s\n", j);
+    free(j);
+    assert(ok);
+    printf("FULL_RANGE_PRECHECK_PASS_OK\n");
+    return 0;
+}
+
+static int testFullRangeRecovery(void) {
+    if (getenv("SEEDFINDER_FULL_RANGE_TEST") == NULL) {
+        printf("FULL_RANGE_SKIPPED\n");
+        return 0;
+    }
+    const uint64_t FULL = 7777777777777777777ULL;
+    Pos p; assert(getStructurePos(Trial_Chambers, MC_NEWEST, FULL, 0, 0, &p));
+    Pos p2; assert(getStructurePos(Trial_Chambers, MC_NEWEST, FULL, 3, -2, &p2));
+    int    jT[2] = { Trial_Chambers, Trial_Chambers };
+    double jX[2] = { (double)((p.x - 8) >> 4) * 16, (double)((p2.x - 8) >> 4) * 16 };
+    double jZ[2] = { (double)((p.z - 8) >> 4) * 16, (double)((p2.z - 8) >> 4) * 16 };
+    int    mT[3] = { Igloo, Jungle_Pyramid, Swamp_Hut };
+    double mX[3], mZ[3];
+    uint32_t lo32 = (uint32_t)(FULL & 0xFFFFFFFFULL);
+    // Anchors sinteticos: e' preciso escolher celulas cujo placement para FULL
+    // seja VIAVEL por bioma, senao o gate do stage 4 (structureIsViable) descarta
+    // a propria seed verdadeira. Cacamos a primeira celula viavel de cada tipo.
+    // (O placement MT depende so' do lo32; a viabilidade, do bioma da seed cheia.)
+    Generator g; setupGenerator(&g, MC_NEWEST, 0); applySeed(&g, DIM_OVERWORLD, FULL);
+    for (int i = 0; i < 3; i++) {
+        int found = 0;
+        for (int rx = -64; rx <= 64 && !found; rx++)
+            for (int rz = -64; rz <= 64 && !found; rz++) {
+                Pos q;
+                if (!getBedrockStructurePos(mT[i], MC_NEWEST, lo32, rx, rz, &q)) continue;
+                if (!structureIsViable(mT[i], &g, q.x, q.z)) continue;
+                mX[i] = (double)q.x; mZ[i] = (double)q.z; found = 1;
+            }
+        assert(found);
+    }
+    // Budget 2400s: stage A (2^32, ~10 min) + stage 4 (~150 s48 x 2^16 lifts a
+    // ~150 us = ~12 min). O guard de viabilidade usa o budget restante, entao
+    // um budget curto faria o teste ser reprovado pelo proprio guard.
+    char *json = seedfinder_crack64(mT, mX, mZ, 3, jT, jX, jZ, 2, 0,
+                                    0, 1ULL << 63, 2000, 2400.0, 8);
+    assert(json);
+    int ok = strstr(json, "7777777777777777777") != NULL;
+    if (!ok) fprintf(stderr, "FULL_RANGE FAIL: %s\n", json);
+    free(json);
+    assert(ok);
+    printf("FULL_RANGE_OK\n");
     return 0;
 }
 
@@ -293,5 +389,7 @@ int main(void) {
     if (testCrack64()) return 1;
     if (testSweepMtSurvivorsRange()) return 1;
     if (testLiftJavaHi()) return 1;
-    return testCrack64Viable();
+    if (testCrack64Viable()) return 1;
+    if (testFullRangePrecheck()) return 1;
+    return testFullRangeRecovery();
 }

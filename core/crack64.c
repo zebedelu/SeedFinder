@@ -158,24 +158,69 @@ Sweep48Result sweep48MT(const Anchor48 *a, uint64_t start, uint64_t end,
     return r;
 }
 
-void liftJavaHi(const Anchor48 *anc, const U64Vec *lo32s,
-                double deadline, U64Vec *out, int *timedOut) {
+typedef struct {
+    const Anchor48 *anc; const U64Vec *lo32s;
+    int lo, hi;                       // fatia [lo, hi) do vetor de sobreviventes
+    double deadline; volatile int *stop;
+    U64Vec out;
+} LiftWorker;
+
+static void *liftWorker(void *arg) {
+    LiftWorker *w = (LiftWorker *)arg;
+    for (int i = w->lo; i < w->hi && !*w->stop; i++) {
+        uint64_t lo32 = w->lo32s->v[i];
+        for (uint64_t hi16 = 0; hi16 < (1ULL << 16); hi16++) {
+            uint64_t s48 = (hi16 << 32) | lo32;
+            int ok = 1;
+            for (int j = 0; j < w->anc->nJava && ok; j++) ok = anchorHit(w->anc, j, s48);
+            if (ok) u64Push(&w->out, s48);
+        }
+        // granularidade por sobrevivente (2^16 probes, ~3-30 ms): o loop
+        // single-thread anterior so' checava a cada 1M probes, mas com 8
+        // workers o custo de nowms_s() por sobrevivente e' desprezivel.
+        if (w->deadline > 0.0 && nowms_s() > w->deadline) { *w->stop = 1; break; }
+    }
+    return NULL;
+}
+
+void liftJavaHi(const Anchor48 *anc, const U64Vec *lo32s, double deadline,
+                int numThreads, U64Vec *out, int *timedOut) {
     *timedOut = 0;
     out->n = 0;
-    uint64_t probes = 0;
-    for (int i = 0; i < lo32s->n; i++) {
-        uint64_t lo32 = lo32s->v[i];
-        for (uint64_t hi16 = 0; hi16 < (1ULL << 16); hi16++) {
-            uint64_t s48 = ((uint64_t)hi16 << 32) | lo32;
-            int ok = 1;
-            for (int j = 0; j < anc->nJava && ok; j++) ok = anchorHit(anc, j, s48);
-            if (ok) u64Push(out, s48);
-            probes++;
-            if ((probes & 0xFFFFF) == 0 && deadline > 0.0 && nowms_s() > deadline) {
-                *timedOut = 1; return;
-            }
-        }
+#if defined(__EMSCRIPTEN__)
+    // Sem -pthread: worker inline (o JS fatia por Web Workers). Idem crack 32.
+    numThreads = 1;
+#endif
+    if (numThreads < 1) numThreads = 1;
+    if (lo32s->n <= 0) return;
+    if (numThreads > lo32s->n) numThreads = lo32s->n;   // >= 1 sobrevivente/worker
+    volatile int stop = 0;
+    LiftWorker *ws = calloc((size_t)numThreads, sizeof(LiftWorker));
+    CrackThread *th = calloc((size_t)numThreads, sizeof(CrackThread));
+    if (!ws || !th) { // OOM: degrada para o caminho inline
+        free(ws); free(th);
+        LiftWorker one = { anc, lo32s, 0, lo32s->n, deadline, &stop, {0} };
+        liftWorker(&one);
+        for (int k = 0; k < one.out.n; k++) u64Push(out, one.out.v[k]);
+        free(one.out.v);
+        return;
     }
+    int part = lo32s->n / numThreads;
+    for (int i = 0; i < numThreads; i++) {
+        ws[i].anc = anc; ws[i].lo32s = lo32s;
+        ws[i].lo = i * part;
+        ws[i].hi = (i == numThreads - 1) ? lo32s->n : (i + 1) * part;
+        ws[i].deadline = deadline; ws[i].stop = &stop;
+    }
+    if (numThreads == 1) liftWorker(&ws[0]);            // inline (WASM)
+    else { for (int i = 0; i < numThreads; i++) th[i] = crackThreadCreate(liftWorker, &ws[i]);
+           for (int i = 0; i < numThreads; i++) crackThreadJoin(th[i]); }
+    *timedOut = stop;
+    for (int i = 0; i < numThreads; i++) {
+        for (int k = 0; k < ws[i].out.n; k++) u64Push(out, ws[i].out.v[k]);
+        free(ws[i].out.v);
+    }
+    free(ws); free(th);
 }
 
 // --- pipeline de seed completa (Task 6) -----------------------------------
@@ -315,40 +360,170 @@ char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mt
         mOrd[j + 1] = key;
     }
 
-    /* --- Estagio 2: sweep 2^48 na janela bounded ------------------------- */
+    /* --- Estagio 2: dispatch por span ------------------------------------ */
     uint64_t span = endSeed - startSeed;
-    uint64_t wLo[2], wHi[2]; int nWin;
-    if (span >= (1ULL << 48)) { wLo[0] = 0; wHi[0] = 1ULL << 48; nWin = 1; }
-    else {
-        uint64_t sLo = startSeed & C64_M48;
-        uint64_t sHi = ((endSeed - 1) & C64_M48) + 1; // (0, 2^48]
-        if (sLo < sHi) { wLo[0] = sLo; wHi[0] = sHi; nWin = 1; }
-        else { // janela envolve mod 2^48: duas pecas disjuntas, sem duplicata
-            wLo[0] = sLo; wHi[0] = 1ULL << 48;
-            wLo[1] = 0;   wHi[1] = sHi;       nWin = 2;
-        }
-    }
-    // deadline GLOBAL: cobre sweep + cross + lift (ruling 7).
-    TR0();
+    int fullRange = (span >= (1ULL << 32));
     double deadline = budgetSec > 0.0 ? nowms_s() + budgetSec * 1000.0 : 0.0;
     U64Vec s48s = {0};
-    uint64_t swept = 0; int effThreads = numThreads, sweepTo = 0;
-    for (int i = 0; i < nWin && !sweepTo; i++) {
-        double rem = deadline > 0.0 ? (deadline - nowms_s()) / 1000.0 : budgetSec;
-        if (deadline > 0.0 && rem <= 0.0) { sweepTo = 1; break; }
-        Sweep48Result r = sweep48MT(&anc, wLo[i], wHi[i], rem, numThreads, &s48s);
-        swept += r.checked; effThreads = r.threads;
-        if (r.timedOut) sweepTo = 1;
-    }
+    uint64_t swept = 0; int effThreads = numThreads;
+    TR0();
+
+    if (!fullRange) {
+        /* Caminho bounded (inalterado): janela de s48 + sweep48MT. */
+        uint64_t wLo[2], wHi[2]; int nWin;
+        if (span >= (1ULL << 48)) { wLo[0] = 0; wHi[0] = 1ULL << 48; nWin = 1; }
+        else {
+            uint64_t sLo = startSeed & C64_M48;
+            uint64_t sHi = ((endSeed - 1) & C64_M48) + 1;
+            if (sLo < sHi) { wLo[0] = sLo; wHi[0] = sHi; nWin = 1; }
+            else {
+                wLo[0] = sLo; wHi[0] = 1ULL << 48;
+                wLo[1] = 0;   wHi[1] = sHi;       nWin = 2;
+            }
+        }
+        int sweepTo = 0;
+        for (int i = 0; i < nWin && !sweepTo; i++) {
+            double rem = deadline > 0.0 ? (deadline - nowms_s()) / 1000.0 : budgetSec;
+            if (deadline > 0.0 && rem <= 0.0) { sweepTo = 1; break; }
+            Sweep48Result r = sweep48MT(&anc, wLo[i], wHi[i], rem, numThreads, &s48s);
+            swept += r.checked; effThreads = r.threads;
+            if (r.timedOut) sweepTo = 1;
+        }
 #ifdef C64_TRACE
-    fprintf(stderr, "[c64] sweep %llu s48s -> %d survivors\n",
-            (unsigned long long)swept, s48s.n);
+        fprintf(stderr, "[c64] sweep %llu s48s -> %d survivors\n",
+                (unsigned long long)swept, s48s.n);
 #endif
-    TR_STAGE("stage2 sweep");
-    if (sweepTo) {
-        free(s48s.v);
-        return strdup("{\"error\":\"2^48 sweep exceeded budget - raise max_seconds, "
-                      "provide 4+ Trial Chambers, or narrow start/end\"}");
+        TR_STAGE("stage2 sweep");
+        if (sweepTo) {
+            free(s48s.v);
+            return strdup("{\"error\":\"2^48 sweep exceeded budget - raise max_seconds, "
+                          "provide 4+ Trial Chambers, or narrow start/end\"}");
+        }
+    } else {
+        /* Full-range: pre-check amostral + stage A (lo32 MT) + stage B (lift
+         * Java 32->48). O lo32 e' varrido por inteiro (independente de
+         * start/end) e o lift cobre os 2^16 hi16 — juntos geram todo o 2^48;
+         * o range de start/end e' aplicado no lift de bioma (estagios 3+4). */
+        crackDetectAvx2();
+        /* Filtro mais forte primeiro: os stages 3+4 usam (t - mt) como indice
+         * de mtTypes, entao ordenamos uma COPIA (o conjunto de sobreviventes e'
+         * o mesmo; so' muda a ordem de avaliacao -> early-exit do crackScore4). */
+        CrackTarget mtSorted[C64_MAX];
+        memcpy(mtSorted, mt, (size_t)nMt * sizeof(CrackTarget));
+        qsort(mtSorted, (size_t)nMt, sizeof(CrackTarget), crackTargetCompare);
+        double rem = deadline > 0.0 ? (deadline - nowms_s()) / 1000.0 : budgetSec;
+        /* Pre-check barato: varre so' a fracao 2^22/2^32 (~1 s) e extrapola os
+         * sobreviventes. Substitui a estimativa analitica por regiao, que errava
+         * porque as colocacoes MT compartilham o mesmo stream RNG. ponytail: a
+         * amostra replica o gate 2^20 com margem; o post-check exato sobre os
+         * lo32 completos (abaixo) continua sendo o gate real. */
+        {
+            const uint64_t SAMPLE = 1ULL << 22;
+            U64Vec s = {0};
+            double t0 = nowms_s();
+            MtSweepResult rs = sweepMtSurvivors(mtSorted, nMt, 0, SAMPLE, rem,
+                                                numThreads, &s);
+            rem -= (nowms_s() - t0) / 1000.0;
+            swept += rs.checked;
+            double predicted = (double)s.n * ((double)0x100000000ULL / (double)SAMPLE);
+            free(s.v);
+            if (predicted > (double)(1 << 20)) {
+                char msg[256];
+                snprintf(msg, sizeof msg,
+                         "{\"error\":\"full-range 64-bit crack needs more MT structures "
+                         "(sampled %d survivors in 2^22 -> ~%.0f over 2^32, gate %d) - "
+                         "add villages/temples/igloos or narrow start/end\"}",
+                         s.n, predicted, 1 << 20);
+                return strdup(msg);
+            }
+        }
+        U64Vec lo32s = {0};
+        MtSweepResult rA = sweepMtSurvivors(mtSorted, nMt, 0, 0x100000000ULL, rem,
+                                            numThreads, &lo32s);
+        swept += rA.checked; effThreads = rA.threads;
+        TR_STAGE("stage A lo32 sweep");
+        if (rA.timedOut) {
+            free(lo32s.v);
+            return strdup("{\"error\":\"64-bit sweep exceeded budget - raise "
+                          "max_seconds or provide more MT structures\"}");
+        }
+        if (lo32s.n > (1 << 20)) {
+            char msg[256];
+            snprintf(msg, sizeof msg,
+                     "{\"error\":\"too many lo32 survivors (%d) - add more MT "
+                     "structures or lower tolerance\"}", lo32s.n);
+            free(lo32s.v);
+            return strdup(msg);
+        }
+        if (lo32s.n == 0) {
+            free(lo32s.v);
+            char *buf = malloc(256);
+            sprintf(buf, "{\"results\":[],\"checked\":%llu,\"timed_out\":false,"
+                         "\"threads\":%d,\"bits\":64}",
+                    (unsigned long long)swept, effThreads);
+            return buf;
+        }
+        /* Pre-check do yield Java: amostra ate' 32 lo32 e extrapola o custo do
+         * stage 4 ANTES de materializar o lift inteiro (que pode passar de 100M
+         * s48 / ~800 MB). Ver guard de viabilidade abaixo para a medicao. */
+        {
+            int ns = lo32s.n < 32 ? lo32s.n : 32;
+            U64Vec sample = { lo32s.v, ns, ns };   // view: liftJavaHi nao libera
+            U64Vec sS = {0}; int toS = 0;
+            liftJavaHi(&anc, &sample, deadline, numThreads, &sS, &toS);
+            double perLo = ns > 0 ? (double)sS.n / (double)ns : 0.0;
+            free(sS.v);
+            uint64_t nHi = ((endSeed - 1) >> 48) - (startSeed >> 48) + 1;
+            double rem2 = deadline > 0.0 ? (deadline - nowms_s()) / 1000.0 : budgetSec;
+            double estSec = perLo * (double)lo32s.n * (double)nHi * 150e-6;
+            if (estSec > rem2 && rem2 > 0.0) {
+                char msg[512];
+                snprintf(msg, sizeof msg,
+                         "{\"error\":\"unbounded 64-bit crack is infeasible with "
+                         "approximate Java anchors: ~%.0f 48-bit candidates "
+                         "(%.2f/lo32) x %llu high-bit lifts (est. %.0fs > %.0fs "
+                         "left) - pass a start/end window (high bits fixed) or "
+                         "exact Trial Chambers/Trail Ruins coordinates\"}",
+                         perLo * (double)lo32s.n, perLo, (unsigned long long)nHi,
+                         estSec, rem2);
+                free(lo32s.v);
+                return strdup(msg);
+            }
+        }
+        int liftTo = 0;
+        liftJavaHi(&anc, &lo32s, deadline, numThreads, &s48s, &liftTo);
+        swept += (uint64_t)lo32s.n * (1ULL << 16); /* iteracoes do lift */
+        free(lo32s.v);
+        TR_STAGE("stage B lift 32->48");
+        if (liftTo) {
+            free(s48s.v);
+            return strdup("{\"error\":\"64-bit lift exceeded budget - raise "
+                          "max_seconds\"}");
+        }
+    }
+
+    /* Guard de viabilidade do stage 4 (full-range): o lift de bioma custa
+     * (hiHi-hiLo+1) seeds por s48 e cada seed custa ~150 us (applySeed + gate de
+     * bioma; medido em probe_tol.c). Sem isso um pedido full-range com ancoras
+     * Java aproximadas "pendura" por horas/dias em vez de falhar (medido: tol 6
+     * -> ~4M-95M s48 -> 1.3e11+ iteracoes). Com ancoras Java exatas o lift gera
+     * ~1 s48 e o full-range completa em segundos. */
+    {
+        uint64_t nHi = ((endSeed - 1) >> 48) - (startSeed >> 48) + 1;
+        double rem2 = deadline > 0.0 ? (deadline - nowms_s()) / 1000.0 : budgetSec;
+        double estSec = (double)s48s.n * (double)nHi * 150e-6;
+        if (fullRange && estSec > rem2 && rem2 > 0.0) {
+            char msg[512];
+            snprintf(msg, sizeof msg,
+                     "{\"error\":\"unbounded 64-bit crack is infeasible with "
+                     "approximate Java anchors: %d 48-bit candidates x %llu high-bit "
+                     "lifts (est. %.0fs > %.0fs left) - pass a start/end window "
+                     "(high bits fixed) or exact Trial Chambers/Trail Ruins "
+                     "coordinates\"}",
+                     s48s.n, (unsigned long long)nHi, estSec, rem2);
+            free(s48s.v);
+            return strdup(msg);
+        }
     }
 
     /* --- Estagios 3+4 fused: cross MT + lift 2^16 via bioma --------------

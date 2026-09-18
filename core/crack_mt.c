@@ -86,7 +86,7 @@ int crackTargetCompare(const void *a, const void *b)
 #if SEEDFINDER_SIMD
 
 __attribute__((target("avx2")))
-void crack_mt4_block(const uint32_t seedlo[4], uint32_t cbase, uint32_t out[4][8])
+void crack_mt8_block(const uint32_t seedlo[8], uint32_t cbase, uint32_t out[4][8])
 {
     __m256i v[401];
     const __m256i mtA   = _mm256_set1_epi32((int)MT_MATRIX_A);
@@ -95,10 +95,12 @@ void crack_mt4_block(const uint32_t seedlo[4], uint32_t cbase, uint32_t out[4][8
     const __m256i one   = _mm256_set1_epi32(1);
     const __m256i initA = _mm256_set1_epi32(1812433253U);
 
+    /* 8 lanes = 8 seeds por init (o __m256i tem 8 x int32). */
     v[0] = _mm256_add_epi32(_mm256_set1_epi32((int)cbase),
                             _mm256_setr_epi32((int)seedlo[0], (int)seedlo[1],
                                               (int)seedlo[2], (int)seedlo[3],
-                                              0, 0, 0, 0));
+                                              (int)seedlo[4], (int)seedlo[5],
+                                              (int)seedlo[6], (int)seedlo[7]));
     for (int i = 1; i <= 400; i++) {
         __m256i prev = v[i - 1];
         __m256i x = _mm256_xor_si256(prev, _mm256_srli_epi32(prev, 30));
@@ -121,26 +123,29 @@ void crack_mt4_block(const uint32_t seedlo[4], uint32_t cbase, uint32_t out[4][8
     }
 }
 
-int crackScore4(const CrackTarget *targets, int nTargets,
-                const uint64_t seeds[4], int64_t score[4])
+int crackScore8(const CrackTarget *targets, int nTargets,
+                const uint64_t seeds[8], int64_t score[8])
 {
-    int alive[4] = {1, 1, 1, 1};
-    int64_t total[4] = {0, 0, 0, 0};
-    uint32_t seedlo[4];
-    for (int l = 0; l < 4; l++)
+    int alive[8], total[8];
+    uint32_t seedlo[8];
+    for (int l = 0; l < 8; l++) {
+        alive[l] = 1; total[l] = 0;
         seedlo[l] = (uint32_t)seeds[l];
+    }
 
     for (int ti = 0; ti < nTargets; ti++) {
-        if (!(alive[0] || alive[1] || alive[2] || alive[3]))
-            break;
+        int any = 0;
+        for (int l = 0; l < 8; l++) any |= alive[l];
+        if (!any) break;
         const CrackTarget *t = &targets[ti];
-        int bestD[4] = {INT32_MAX, INT32_MAX, INT32_MAX, INT32_MAX};
+        int bestD[8];
+        for (int l = 0; l < 8; l++) bestD[l] = INT32_MAX;
         int place = crackPlacement(t->type);
 
         if (place != PLACE_OTHER) {
             StructureConfig sconf;
             if (!getBedrockStructureConfig(t->type, MC_NEWEST, &sconf)) {
-                for (int l = 0; l < 4; l++) alive[l] = 0;
+                for (int l = 0; l < 8; l++) alive[l] = 0;
                 continue;
             }
             const int range = sconf.chunkRange;
@@ -154,9 +159,9 @@ int crackScore4(const CrackTarget *targets, int nTargets,
                                                  + (uint64_t)regZ * REGION_SALT_Z
                                                  + sconf.salt);
                 uint32_t w[4][8];
-                crack_mt4_block(seedlo, cbase, w);
+                crack_mt8_block(seedlo, cbase, w);
 
-                for (int l = 0; l < 4; l++) {
+                for (int l = 0; l < 8; l++) {
                     if (!alive[l]) continue;
                     const uint32_t m0 = w[0][l], m1 = w[1][l];
                     const uint32_t m2 = w[2][l], m3 = w[3][l];
@@ -185,13 +190,13 @@ int crackScore4(const CrackTarget *targets, int nTargets,
                         bestD[l] = d2;
                 }
                 int done = 1;
-                for (int l = 0; l < 4; l++)
+                for (int l = 0; l < 8; l++)
                     if (alive[l] && bestD[l] != 0) done = 0;
                 if (done) break;
             }
         } else {
             for (int r = 0; r < t->numRegions; r++) {
-                for (int l = 0; l < 4; l++) {
+                for (int l = 0; l < 8; l++) {
                     if (!alive[l]) continue;
                     Pos pos;
                     if (!getBedrockStructurePos(t->type, MC_NEWEST, seeds[l],
@@ -208,7 +213,7 @@ int crackScore4(const CrackTarget *targets, int nTargets,
             }
         }
 
-        for (int l = 0; l < 4; l++) {
+        for (int l = 0; l < 8; l++) {
             if (!alive[l]) continue;
             if (bestD[l] == INT32_MAX || bestD[l] > t->maxD2) {
                 alive[l] = 0;
@@ -219,7 +224,7 @@ int crackScore4(const CrackTarget *targets, int nTargets,
     }
 
     int n = 0;
-    for (int l = 0; l < 4; l++) {
+    for (int l = 0; l < 8; l++) {
         score[l] = alive[l] ? total[l] : -1;
         n += alive[l];
     }
@@ -246,16 +251,16 @@ static void *mtSweepWorker(void *arg) {
     uint64_t seed = w->start;
 #if SEEDFINDER_SIMD
     if (crack_g_avx2) {
-        const uint64_t simdEnd = w->end - ((w->end - w->start) & 3ULL);
-        for (; seed < simdEnd; seed += 4) {
+        const uint64_t simdEnd = w->end - ((w->end - w->start) & 7ULL);
+        for (; seed < simdEnd; seed += 8) {
             if (((seed - w->start) & 0xFFFFULL) == 0) {
                 if (*w->stop) break;
                 if (w->deadline > 0.0 && nowms_s() > w->deadline) { *w->stop = 1; break; }
             }
-            uint64_t batch[4]; int64_t scores[4];
-            for (int l = 0; l < 4; l++) batch[l] = seed + (uint64_t)l;
-            crackScore4(w->targets, w->nTargets, batch, scores);
-            for (int l = 0; l < 4; l++) {
+            uint64_t batch[8]; int64_t scores[8];
+            for (int l = 0; l < 8; l++) batch[l] = seed + (uint64_t)l;
+            crackScore8(w->targets, w->nTargets, batch, scores);
+            for (int l = 0; l < 8; l++) {
                 w->checked++;
                 if (scores[l] >= 0) u64Push(&w->out, batch[l]);
             }

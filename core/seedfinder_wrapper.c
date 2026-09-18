@@ -232,8 +232,8 @@ static void *crackWorker(void *arg)
 
 #if SEEDFINDER_SIMD
     if (crack_g_avx2) {
-        const uint64_t simdEnd = w->end - ((w->end - w->start) & 3ULL);
-        for (; seed < simdEnd; seed += 4) {
+        const uint64_t simdEnd = w->end - ((w->end - w->start) & 7ULL);
+        for (; seed < simdEnd; seed += 8) {
             if (((seed - w->start) & 0xFFFFULL) == 0) {
                 if (*w->stop)
                     break;
@@ -242,12 +242,12 @@ static void *crackWorker(void *arg)
                     break;
                 }
             }
-            uint64_t batch[4];
-            int64_t scores[4];
-            for (int l = 0; l < 4; l++)
+            uint64_t batch[8];
+            int64_t scores[8];
+            for (int l = 0; l < 8; l++)
                 batch[l] = seed + (uint64_t)l;
-            crackScore4(w->targets, w->nTargets, batch, scores);
-            for (int l = 0; l < 4; l++) {
+            crackScore8(w->targets, w->nTargets, batch, scores);
+            for (int l = 0; l < 8; l++) {
                 w->checked++;
                 if (scores[l] >= 0)
                     crackInsert(w, batch[l], scores[l]);

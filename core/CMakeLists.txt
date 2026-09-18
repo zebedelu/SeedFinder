@@ -6,6 +6,13 @@ set(SEEDFINDER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 project(seedfinder_lib C)
 set(CMAKE_C_STANDARD 11)
 
+# Sem isto o CMake usa flags vazias (-O0): o crack 32-bit cai de ~2.8M para
+# ~17M seeds/s e o sweep full-range 64-bit (2^32) fica ~2.3x mais lento.
+# ponytail: forca so' quando ninguem escolheu nada (cache vazio/antigo).
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 if(MINGW)
  add_compile_options(-Wall -Wextra)
  add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX SEEDFINDER_BRIDGE_SHARED)
