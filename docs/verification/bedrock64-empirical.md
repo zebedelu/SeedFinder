@@ -185,3 +185,20 @@ pipeline descarta corretamente o próprio seed-alvo — o teste original era
 impossível de passar (Jungle Pyramid e Swamp Hut não eram viáveis nas células
 escolhidas). O teste agora caça a primeira célula viável por tipo (`±64`).
 
+### Efeito do build Release no `/scan` (2026-09-18)
+
+Mesmos cenários da tabela v1.2.0 do README (seed 8675309, pos 0,0, 1 warm-up +
+5 requests via `curl.exe -w "%{time_total}"`, servidor local):
+
+| Cenário | v1.2.0 (`-O0`) | agora (`-O3`) | ganho |
+|---|---|---|---|
+| Buried Treasure r=200, types 14 | 220,8 ms | 55,9 ms | 3,9× |
+| Ancient City r=500, types 13 | 68,9 ms | 25,4 ms | 2,7× |
+| Village+Monument+Mansion r=300, types 5,8,9 | 196,7 ms | 43,2 ms | 4,6× |
+| 5 tipos r=1000, types 5,14,13,9,10 | — | 1354,3 ms | — |
+
+Nota: a coluna "Results" das tabelas históricas do README não é reproduzível
+parâmetro-a-parâmetro (ex.: o cenário Village r=100 lista 1 resultado; com
+`max=20` hoje retornam 9). Comparar apenas os tempos, que usam a mesma URL.
+
+
