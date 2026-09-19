@@ -1,13 +1,7 @@
 #ifndef SEEDFINDER_CRACK_MT_H_
 #define SEEDFINDER_CRACK_MT_H_
 #include <stdint.h>
-
-#if (defined(__x86_64__) || defined(__i386__)) && defined(__GNUC__)
-#include <immintrin.h>
-#define SEEDFINDER_SIMD 1
-#else
-#define SEEDFINDER_SIMD 0
-#endif
+#include "crack_simd.h"
 
 #define CRACK_MAX_STRUCTURES 24
 #define CRACK_MAX_REGIONS 64
@@ -30,13 +24,12 @@ int       crackPlacement(int structureType);       /* PLACE_FEATURE/LARGE/OTHER 
 int64_t   crackScore(const CrackTarget *t, int n, uint64_t seed);
 int       crackTargetCompare(const void *a, const void *b);
 
-extern int crack_g_avx2;
-void      crackDetectAvx2(void);            /* preenche crack_g_avx2 */
+extern int crack_g_simd;
+void      crackSimdDetect(void);            /* preenche crack_g_simd */
 
-#if SEEDFINDER_SIMD
-void crack_mt8_block(const uint32_t seedlo[8], uint32_t cbase, uint32_t out[4][8]);
-int  crackScore8(const CrackTarget *targets, int nTargets,
-                 const uint64_t seeds[8], int64_t score[8]);
+#if CRACK_SIMD
+int crackScoreSimd(const CrackTarget *targets, int nTargets,
+                   const uint64_t seeds[CRACK_WIDTH], int64_t score[CRACK_WIDTH]);
 #endif
 
 typedef struct { uint64_t checked; int timedOut, threads; } MtSweepResult;

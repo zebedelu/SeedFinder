@@ -230,10 +230,10 @@ static void *crackWorker(void *arg)
     CrackWorker *w = (CrackWorker *)arg;
     uint64_t seed = w->start;
 
-#if SEEDFINDER_SIMD
-    if (crack_g_avx2) {
-        const uint64_t simdEnd = w->end - ((w->end - w->start) & 7ULL);
-        for (; seed < simdEnd; seed += 8) {
+#if CRACK_SIMD
+    if (crack_g_simd) {
+        const uint64_t simdEnd = w->end - ((w->end - w->start) % (uint64_t)CRACK_WIDTH);
+        for (; seed < simdEnd; seed += CRACK_WIDTH) {
             if (((seed - w->start) & 0xFFFFULL) == 0) {
                 if (*w->stop)
                     break;
@@ -242,12 +242,12 @@ static void *crackWorker(void *arg)
                     break;
                 }
             }
-            uint64_t batch[8];
-            int64_t scores[8];
-            for (int l = 0; l < 8; l++)
+            uint64_t batch[CRACK_WIDTH];
+            int64_t scores[CRACK_WIDTH];
+            for (int l = 0; l < CRACK_WIDTH; l++)
                 batch[l] = seed + (uint64_t)l;
-            crackScore8(w->targets, w->nTargets, batch, scores);
-            for (int l = 0; l < 8; l++) {
+            crackScoreSimd(w->targets, w->nTargets, batch, scores);
+            for (int l = 0; l < CRACK_WIDTH; l++) {
                 w->checked++;
                 if (scores[l] >= 0)
                     crackInsert(w, batch[l], scores[l]);
@@ -295,8 +295,8 @@ SEEDFINDER_API char *seedfinder_crack(
     if (startSeed >= endSeed)
         return strdup("{\"error\":\"empty seed range\"}");
 
-#if SEEDFINDER_SIMD
-    crackDetectAvx2();
+#if CRACK_SIMD
+    crackSimdDetect();
 #endif
 
     CrackTarget targets[CRACK_MAX_STRUCTURES];

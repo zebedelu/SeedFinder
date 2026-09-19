@@ -404,7 +404,7 @@ char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mt
          * Java 32->48). O lo32 e' varrido por inteiro (independente de
          * start/end) e o lift cobre os 2^16 hi16 — juntos geram todo o 2^48;
          * o range de start/end e' aplicado no lift de bioma (estagios 3+4). */
-        crackDetectAvx2();
+        crackSimdDetect();
         /* Filtro mais forte primeiro: os stages 3+4 usam (t - mt) como indice
          * de mtTypes, entao ordenamos uma COPIA (o conjunto de sobreviventes e'
          * o mesmo; so' muda a ordem de avaliacao -> early-exit do crackScore4). */

@@ -9,13 +9,15 @@
 #include <stdlib.h>
 #include <limits.h>
 
-int crack_g_avx2 = 0; /* runtime AVX2 flag, set once by crackDetectAvx2() */
+int crack_g_simd = 0; /* disponibilidade SIMD em runtime; setada por crackSimdDetect() */
 
-void crackDetectAvx2(void) {
-#if SEEDFINDER_SIMD
-    crack_g_avx2 = __builtin_cpu_supports("avx2");
+void crackSimdDetect(void) {
+#if CRACK_SIMD && (defined(__x86_64__) || defined(__i386__))
+    crack_g_simd = __builtin_cpu_supports("avx2");
+#elif CRACK_SIMD
+    crack_g_simd = 1; /* WASM SIMD128: garantido em compile time */
 #else
-    crack_g_avx2 = 0; /* WASM/scalar: sem AVX2 */
+    crack_g_simd = 0;
 #endif
 }
 
@@ -83,69 +85,72 @@ int crackTargetCompare(const void *a, const void *b)
     return 0;
 }
 
-#if SEEDFINDER_SIMD
+#if CRACK_SIMD
 
+#if defined(__x86_64__) || defined(__i386__)
 __attribute__((target("avx2")))
-void crack_mt8_block(const uint32_t seedlo[8], uint32_t cbase, uint32_t out[4][8])
+#endif
+static void crack_mt_block(const uint32_t seedlo[CRACK_WIDTH], uint32_t cbase,
+                           uint32_t out[4][CRACK_WIDTH])
 {
-    __m256i v[401];
-    const __m256i mtA   = _mm256_set1_epi32((int)MT_MATRIX_A);
-    const __m256i upper = _mm256_set1_epi32((int)MT_UPPER_MASK);
-    const __m256i lower = _mm256_set1_epi32((int)MT_LOWER_MASK);
-    const __m256i one   = _mm256_set1_epi32(1);
-    const __m256i initA = _mm256_set1_epi32(1812433253U);
+    crack_vec v[CRACK_GROUPS][401];
+    const crack_vec mtA   = CV_SPLAT(MT_MATRIX_A);
+    const crack_vec upper = CV_SPLAT(MT_UPPER_MASK);
+    const crack_vec lower = CV_SPLAT(MT_LOWER_MASK);
+    const crack_vec one   = CV_SPLAT(1);
+    const crack_vec initA = CV_SPLAT(1812433253U);
+    const crack_vec zero  = CV_SPLAT(0);
 
-    /* 8 lanes = 8 seeds por init (o __m256i tem 8 x int32). */
-    v[0] = _mm256_add_epi32(_mm256_set1_epi32((int)cbase),
-                            _mm256_setr_epi32((int)seedlo[0], (int)seedlo[1],
-                                              (int)seedlo[2], (int)seedlo[3],
-                                              (int)seedlo[4], (int)seedlo[5],
-                                              (int)seedlo[6], (int)seedlo[7]));
+    /* 8 lanes = 8 seeds por init (AVX2) / 4 lanes por init (WASM SIMD128).
+     * CRACK_GROUPS>1 roda grupos independentes no mesmo laco (ILP). */
+    for (int g = 0; g < CRACK_GROUPS; g++)
+        v[g][0] = CV_ADD(CV_SPLAT(cbase),
+                         CV_SEEDS(seedlo + (size_t)g * CRACK_LANES));
     for (int i = 1; i <= 400; i++) {
-        __m256i prev = v[i - 1];
-        __m256i x = _mm256_xor_si256(prev, _mm256_srli_epi32(prev, 30));
-        v[i] = _mm256_add_epi32(_mm256_mullo_epi32(initA, x), _mm256_set1_epi32(i));
+        const crack_vec ci = CV_SPLAT(i);
+        for (int g = 0; g < CRACK_GROUPS; g++) {
+            crack_vec prev = v[g][i - 1];
+            crack_vec x = CV_XOR(prev, CV_SHR(prev, 30));
+            v[g][i] = CV_ADD(CV_MUL(initA, x), ci);
+        }
     }
     for (int i = 0; i < 4; i++) {
-        __m256i y = _mm256_or_si256(_mm256_and_si256(v[i], upper),
-                                    _mm256_and_si256(v[i + 1], lower));
-        __m256i mag = _mm256_and_si256(mtA, _mm256_sub_epi32(_mm256_setzero_si256(),
-                                       _mm256_and_si256(y, one)));
-        __m256i t = _mm256_xor_si256(v[i + 397],
-                    _mm256_xor_si256(_mm256_srli_epi32(y, 1), mag));
-        t = _mm256_xor_si256(t, _mm256_srli_epi32(t, 11));
-        t = _mm256_xor_si256(t, _mm256_and_si256(_mm256_slli_epi32(t, 7),
-                              _mm256_set1_epi32((int)0x9d2c5680U)));
-        t = _mm256_xor_si256(t, _mm256_and_si256(_mm256_slli_epi32(t, 15),
-                              _mm256_set1_epi32((int)0xefc60000U)));
-        t = _mm256_xor_si256(t, _mm256_srli_epi32(t, 18));
-        _mm256_storeu_si256((__m256i *)out[i], t);
+        for (int g = 0; g < CRACK_GROUPS; g++) {
+            crack_vec y = CV_OR(CV_AND(v[g][i], upper), CV_AND(v[g][i + 1], lower));
+            crack_vec mag = CV_AND(mtA, CV_SUB(zero, CV_AND(y, one)));
+            crack_vec t = CV_XOR(v[g][i + 397], CV_XOR(CV_SHR(y, 1), mag));
+            t = CV_XOR(t, CV_SHR(t, 11));
+            t = CV_XOR(t, CV_AND(CV_SHL(t, 7), CV_SPLAT(0x9d2c5680U)));
+            t = CV_XOR(t, CV_AND(CV_SHL(t, 15), CV_SPLAT(0xefc60000U)));
+            t = CV_XOR(t, CV_SHR(t, 18));
+            CV_STORE(out[i] + (size_t)g * CRACK_LANES, t);
+        }
     }
 }
 
-int crackScore8(const CrackTarget *targets, int nTargets,
-                const uint64_t seeds[8], int64_t score[8])
+int crackScoreSimd(const CrackTarget *targets, int nTargets,
+                   const uint64_t seeds[CRACK_WIDTH], int64_t score[CRACK_WIDTH])
 {
-    int alive[8], total[8];
-    uint32_t seedlo[8];
-    for (int l = 0; l < 8; l++) {
+    int alive[CRACK_WIDTH], total[CRACK_WIDTH];
+    uint32_t seedlo[CRACK_WIDTH];
+    for (int l = 0; l < CRACK_WIDTH; l++) {
         alive[l] = 1; total[l] = 0;
         seedlo[l] = (uint32_t)seeds[l];
     }
 
     for (int ti = 0; ti < nTargets; ti++) {
         int any = 0;
-        for (int l = 0; l < 8; l++) any |= alive[l];
+        for (int l = 0; l < CRACK_WIDTH; l++) any |= alive[l];
         if (!any) break;
         const CrackTarget *t = &targets[ti];
-        int bestD[8];
-        for (int l = 0; l < 8; l++) bestD[l] = INT32_MAX;
+        int bestD[CRACK_WIDTH];
+        for (int l = 0; l < CRACK_WIDTH; l++) bestD[l] = INT32_MAX;
         int place = crackPlacement(t->type);
 
         if (place != PLACE_OTHER) {
             StructureConfig sconf;
             if (!getBedrockStructureConfig(t->type, MC_NEWEST, &sconf)) {
-                for (int l = 0; l < 8; l++) alive[l] = 0;
+                for (int l = 0; l < CRACK_WIDTH; l++) alive[l] = 0;
                 continue;
             }
             const int range = sconf.chunkRange;
@@ -158,10 +163,10 @@ int crackScore8(const CrackTarget *targets, int nTargets,
                 const uint32_t cbase = (uint32_t)((uint64_t)regX * REGION_SALT_X
                                                  + (uint64_t)regZ * REGION_SALT_Z
                                                  + sconf.salt);
-                uint32_t w[4][8];
-                crack_mt8_block(seedlo, cbase, w);
+                uint32_t w[4][CRACK_WIDTH];
+                crack_mt_block(seedlo, cbase, w);
 
-                for (int l = 0; l < 8; l++) {
+                for (int l = 0; l < CRACK_WIDTH; l++) {
                     if (!alive[l]) continue;
                     const uint32_t m0 = w[0][l], m1 = w[1][l];
                     const uint32_t m2 = w[2][l], m3 = w[3][l];
@@ -190,13 +195,13 @@ int crackScore8(const CrackTarget *targets, int nTargets,
                         bestD[l] = d2;
                 }
                 int done = 1;
-                for (int l = 0; l < 8; l++)
+                for (int l = 0; l < CRACK_WIDTH; l++)
                     if (alive[l] && bestD[l] != 0) done = 0;
                 if (done) break;
             }
         } else {
             for (int r = 0; r < t->numRegions; r++) {
-                for (int l = 0; l < 8; l++) {
+                for (int l = 0; l < CRACK_WIDTH; l++) {
                     if (!alive[l]) continue;
                     Pos pos;
                     if (!getBedrockStructurePos(t->type, MC_NEWEST, seeds[l],
@@ -213,7 +218,7 @@ int crackScore8(const CrackTarget *targets, int nTargets,
             }
         }
 
-        for (int l = 0; l < 8; l++) {
+        for (int l = 0; l < CRACK_WIDTH; l++) {
             if (!alive[l]) continue;
             if (bestD[l] == INT32_MAX || bestD[l] > t->maxD2) {
                 alive[l] = 0;
@@ -224,13 +229,13 @@ int crackScore8(const CrackTarget *targets, int nTargets,
     }
 
     int n = 0;
-    for (int l = 0; l < 8; l++) {
+    for (int l = 0; l < CRACK_WIDTH; l++) {
         score[l] = alive[l] ? total[l] : -1;
         n += alive[l];
     }
     return n;
 }
-#endif /* SEEDFINDER_SIMD */
+#endif /* CRACK_SIMD */
 
 /* --- sweepMtSurvivors (novo): coleta TODOS os lo32 sobreviventes ----------
  * Mesmo padrao de sweep48MT/crackWorker: stop volatil + deadline absoluto em
@@ -249,18 +254,18 @@ typedef struct {
 static void *mtSweepWorker(void *arg) {
     MtSweepWorker *w = (MtSweepWorker *)arg;
     uint64_t seed = w->start;
-#if SEEDFINDER_SIMD
-    if (crack_g_avx2) {
-        const uint64_t simdEnd = w->end - ((w->end - w->start) & 7ULL);
-        for (; seed < simdEnd; seed += 8) {
+#if CRACK_SIMD
+    if (crack_g_simd) {
+        const uint64_t simdEnd = w->end - ((w->end - w->start) % (uint64_t)CRACK_WIDTH);
+        for (; seed < simdEnd; seed += CRACK_WIDTH) {
             if (((seed - w->start) & 0xFFFFULL) == 0) {
                 if (*w->stop) break;
                 if (w->deadline > 0.0 && nowms_s() > w->deadline) { *w->stop = 1; break; }
             }
-            uint64_t batch[8]; int64_t scores[8];
-            for (int l = 0; l < 8; l++) batch[l] = seed + (uint64_t)l;
-            crackScore8(w->targets, w->nTargets, batch, scores);
-            for (int l = 0; l < 8; l++) {
+            uint64_t batch[CRACK_WIDTH]; int64_t scores[CRACK_WIDTH];
+            for (int l = 0; l < CRACK_WIDTH; l++) batch[l] = seed + (uint64_t)l;
+            crackScoreSimd(w->targets, w->nTargets, batch, scores);
+            for (int l = 0; l < CRACK_WIDTH; l++) {
                 w->checked++;
                 if (scores[l] >= 0) u64Push(&w->out, batch[l]);
             }
