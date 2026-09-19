@@ -37,11 +37,14 @@ FIXTURE_8675309 = [
     {"type": 8, "x": 712, "z": 760},
 ]
 
+# (712,-520) foi removida: era um falso positivo do gate Java antigo (bioma na
+# propria celula invalido), nao uma vila real do seed 31415. Substituida por
+# (-1448,-264), vila real confirmada pelo gate Bedrock.
 FIXTURE_31415 = [
-    {"type": 5, "x": 712, "z": -520},
     {"type": 5, "x": -360, "z": -840},
     {"type": 5, "x": 168, "z": 1176},
     {"type": 5, "x": 136, "z": -1352},
+    {"type": 5, "x": -1448, "z": -264},
 ]
 
 # Fictitious structures from the WASM false-positive report: the cracker

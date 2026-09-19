@@ -4,6 +4,7 @@
 #include "ChunkBiomesGUI/cubiomes/util.h"
 #include "crack64.h"
 #include "crack_mt.h"
+#include "viability.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,22 +47,31 @@ static int compareByDistance(const void *a, const void *b)
     return 0;
 }
 
-/* Bedrock checks the biome at the structure's OWN position cell; the upstream
- * Java-style gate samples an offset door corner and passes positions sitting
- * on swamp/river/etc. Shared by /scan and the crack result filter. Declared
- * in crack64.h — seedfinder_crack64's 16-bit biome lift calls it too. */
+/* Bioma na celula da PROPRIa estrutura (checagem Bedrock): centro do chunk em
+ * unidades de 4 blocos, no topo do mundo. x,z sao a posicao em blocos
+ * (chunk*16+8), entao equivale a x>>2. */
+static int bedrockOwnCellBiome(Generator *g, int x, int z)
+{
+    int cellX = (x >> 4) * 4 + 2;
+    int cellZ = (z >> 4) * 4 + 2;
+    return getBiomeAt(g, 0, cellX, 319 >> 2, cellZ);
+}
+
+/* Gate de viabilidade compartilhado por /scan, seedfinder_crack e o lift de
+ * bioma do seedfinder_crack64. Declarado em crack64.h.
+ *
+ * O pre-filtro Java (`isViableBedrockStructurePos`) cobre regras que o Bedrock
+ * compartilha (ex. Ruined_Portal sempre viavel, Trail_Ruins/Trial_Chambers
+ * gerados identicamente a Java), mas ele amostra o bioma no canto da
+ * bounding box via LCG Java. O Bedrock confere o bioma na celula da propria
+ * estrutura; sem a segunda checagem, posicoes em rio/pantano/oceano passam
+ * como vila — os falsos positivos relatados. */
 int structureIsViable(int structureType, Generator *g, int x, int z)
 {
     if (!isViableBedrockStructurePos(structureType, g, x, z, 0))
         return 0;
-    if (structureType == Outpost) {
-        int cellX = (x >> 4) * 4 + 2;
-        int cellZ = (z >> 4) * 4 + 2;
-        int bio = getBiomeAt(g, 0, cellX, 319 >> 2, cellZ);
-        if (bio < 0 || !isViableFeatureBiome(MC_NEWEST, Outpost, bio))
-            return 0;
-    }
-    return 1;
+    int bio = bedrockOwnCellBiome(g, x, z);
+    return bedrockViableBiome(structureType, bio);
 }
 
 SEEDFINDER_API const char *seedfinder_status(void)
