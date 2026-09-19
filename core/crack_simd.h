@@ -50,7 +50,7 @@
  * CRACK_GROUPS=1 nao custa nada; subir esconde a latencia de i32x4.mul
  * (ver Task 4 — so mudar depois de medir). */
 #ifndef CRACK_GROUPS
-  #define CRACK_GROUPS 1
+  #define CRACK_GROUPS 4
 #endif
 #define CRACK_WIDTH (CRACK_LANES * CRACK_GROUPS)
 
