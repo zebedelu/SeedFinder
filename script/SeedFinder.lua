@@ -1,26 +1,37 @@
 -- ============================================================================
--- SeedFinder — Minecraft Bedrock Structure Finder (HTTP Bridge Edition)
--- Uses network.get() to call the local SeedFinder Flask API
+-- SeedFinder — Minecraft Bedrock Structure Finder
+-- Uses network.getAsync() to call the SeedFinder API. Works with either the
+-- local Flask server (127.0.0.1:7890) or the hosted API at
+-- mineseedfinder.vercel.app. Leave the Server URL field empty to use the
+-- hosted server.
 -- ============================================================================
 
 name = "SeedFinder"
-description = "See structure of the map with the seed, without chunkbase"
+description = "See structure of the map with the seed, fully integrated"
 author = "zebedelu"
+version = "1.3.1"
 
 -- ============================================================================
 -- Section 1: HTTP Bridge Integration
 -- ============================================================================
 
-local SERVER_URL = "http://127.0.0.1:7890"
+local HOSTED_URL = "https://mineseedfinder.vercel.app"
+local SERVER_URL = HOSTED_URL
 local serverOnline = false
 local serverWarned = false
 local rateLimited = false
 local rateLimitedWarned = false
 local lastServerCheck = 0
 
+-- In-flight guards: network.getAsync is non-blocking, but we still must not
+-- fire a second request while one is already resolving.
+local statusRequestInFlight = false
+local scanRequestInFlight = false
+
 -- Detect HTTP 429 (Vercel firewall rate limit). network.get only returns the
 -- body, so we look for the markers Vercel/CF put in rate-limit responses.
-local function isRateLimited(response)
+local function isRateLimited(response, statusCode)
+	if statusCode == 429 then return true end
 	if not response or type(response) ~= "string" then return false end
 	local lower = response:lower()
 	return lower:find("429") ~= nil
@@ -28,27 +39,35 @@ local function isRateLimited(response)
 		or lower:find("rate limit") ~= nil
 end
 
-local function checkServer()
+local function checkServerAsync()
 	local now = os.clock()
-	if now - lastServerCheck < 5 then return serverOnline end
+	if now - lastServerCheck < 5 then return end
+	if statusRequestInFlight then return end
 	lastServerCheck = now
+	statusRequestInFlight = true
 
-	local ok, response = pcall(network.get, SERVER_URL .. "/status")
-	if ok and response and type(response) == "string" and response ~= "" and response ~= "null" then
-		if response:find('"ok"') or response:find('"status"') then
-			serverOnline = true
-			serverWarned = false
-		elseif isRateLimited(response) then
-			serverOnline = true
-			rateLimited = true
-			serverWarned = false
+	network.getAsync(SERVER_URL .. "/status", function(response, statusCode, success)
+		statusRequestInFlight = false
+
+		if success and response and type(response) == "string" and response ~= "" and response ~= "null" then
+			if response:find('"ok"') or response:find('"status"') then
+				serverOnline = true
+				serverWarned = false
+			elseif isRateLimited(response, statusCode) then
+				serverOnline = true
+				rateLimited = true
+				serverWarned = false
+			else
+				serverOnline = false
+			end
 		else
 			serverOnline = false
+			if not serverWarned then
+				serverWarned = true
+				log("SeedFinder: Failed to reach server at " .. SERVER_URL)
+			end
 		end
-	else
-		serverOnline = false
-	end
-	return serverOnline
+	end)
 end
 
 -- ============================================================================
@@ -222,7 +241,7 @@ end
 local seedTextBox = settings.addTextBox("Seed", "Enter your world seed (numbers only)", "1", 30)
 local radiusSlider = settings.addSlider("Radius", "How far to search (chunks)", 10, 200, 1)
 local maxResultsSlider = settings.addSlider("Max Results", "Maximum structures to display", 15, 50, 1)
-local serverUrlTextBox = settings.addTextBox("Server URL", "SeedFinder API server", "http://127.0.0.1:7890", 40)
+local serverUrlTextBox = settings.addTextBox("Server URL", "Leave empty to connect to the hosted server (mineseedfinder.vercel.app)", "", 40)
 local rescanKey = settings.addKeybind("Rescan", "Press to clear and rescan structures")
 local notifyToggle = settings.addToggle("Scan Notification", "Show a notification when scan completes", true)
 
@@ -270,7 +289,91 @@ local lastDimension = ""
 local rescanKeyHeld = false
 
 -- ============================================================================
--- Section 5: TickEvent Handler
+-- Section 5: Async scan request
+-- ============================================================================
+
+local function fireScanRequest()
+	if scanRequestInFlight then return end
+	if not currentSeed then return end
+
+	-- Build types list (use safe reader for toggle persistence)
+	local typeIds = {}
+	for _, entry in ipairs(TOGGLE_TYPE_MAP) do
+		if getBool(entry.toggle, true) then
+			table.insert(typeIds, entry.id)
+		end
+	end
+
+	if #typeIds == 0 then
+		scanResults = {}
+		needsRescan = false
+		return
+	end
+
+	-- Build URL (use getNum + math.floor for integer values)
+	local typesStr = table.concat(typeIds, ",")
+	local seedStr = string.format("%.0f", currentSeed)
+	local scanUrl = string.format(
+		"%s/scan?seed=%s&x=%.1f&z=%.1f&radius=%d&max=%d&types=%s",
+		SERVER_URL,
+		seedStr,
+		lastPlayerX,
+		lastPlayerZ,
+		math.floor(getNum(radiusSlider, 10)),
+		math.floor(getNum(maxResultsSlider, 15)),
+		typesStr
+	)
+
+	scanRequestInFlight = true
+	needsRescan = false -- claimed by this in-flight request; re-armed on failure below
+
+	network.getAsync(scanUrl, function(response, statusCode, success)
+		scanRequestInFlight = false
+
+		if success and response and type(response) == "string" and response ~= "" and response ~= "null" then
+			local parsed = parseScanResponse(response)
+			if #parsed > 0 or response:find('"results"') then
+				scanResults = parsed
+				rateLimited = false
+				rateLimitedWarned = false
+				serverOnline = true
+				serverWarned = false
+				if getBool(notifyToggle, true) then
+					client.notify(string.format("Scan complete! %d structures found", #scanResults))
+				end
+			elseif isRateLimited(response, statusCode) then
+				rateLimited = true
+				serverOnline = true
+				serverWarned = false
+				if not rateLimitedWarned then
+					rateLimitedWarned = true
+					log("SeedFinder: Rate limited (60 requests/min). Keeping previously scanned structures.")
+					client.notify("SeedFinder: Rate limited! Max 60 requests per minute. Keeping previous results.")
+				end
+			else
+				if not serverWarned then
+					serverWarned = true
+					log("SeedFinder: Failed to reach server at " .. SERVER_URL)
+				end
+				serverOnline = false
+				rateLimited = false
+			end
+		else
+			if not serverWarned then
+				serverWarned = true
+				log("SeedFinder: Failed to reach server at " .. SERVER_URL)
+			end
+			serverOnline = false
+			rateLimited = false
+			-- Request failed outright — re-arm so the next tick tries again
+			-- instead of getting stuck forever.
+			needsRescan = true
+		end
+	end)
+end
+
+-- ============================================================================
+-- Section 6: TickEvent Handler
 -- ============================================================================
 
 local function onTick()
@@ -278,10 +381,13 @@ local function onTick()
 	local px, py, pz = player.position()
 	if not px or px == 0.0 and py == 0.0 and pz == 0.0 then return end
 
-	-- Update server URL if changed (use safe reader for persistence)
-	local url = getStr(serverUrlTextBox, "http://127.0.0.1:7890")
+	-- Update server URL if changed (use safe reader for persistence).
+	-- Empty field = use the hosted server.
+	local url = getStr(serverUrlTextBox, "")
 	if url and url ~= "" then
 		SERVER_URL = url:gsub("/+$", "") -- trim trailing slash
+	else
+		SERVER_URL = HOSTED_URL
 	end
 
 	-- Check dimension change
@@ -318,83 +424,17 @@ local function onTick()
 	end
 	rescanKeyHeld = rescanKeyDown
 
+	-- Keep the status check alive independently (throttled to every 5s inside checkServerAsync)
+	checkServerAsync()
 
 	if not needsRescan then return end
 	if not currentSeed then return end
 
-	-- Build types list (use safe reader for toggle persistence)
-	local typeIds = {}
-	for _, entry in ipairs(TOGGLE_TYPE_MAP) do
-		if getBool(entry.toggle, true) then
-			table.insert(typeIds, entry.id)
-		end
-	end
-
-	if #typeIds == 0 then
-		scanResults = {}
-		needsRescan = false
-		return
-	end
-
-	-- Build URL (use getNum + math.floor for integer values)
-	local typesStr = table.concat(typeIds, ",")
-	local seedStr = string.format("%.0f", currentSeed)
-	local scanUrl = string.format(
-		"%s/scan?seed=%s&x=%.1f&z=%.1f&radius=%d&max=%d&types=%s",
-		SERVER_URL,
-		seedStr,
-		lastPlayerX,
-		lastPlayerZ,
-		math.floor(getNum(radiusSlider, 10)),
-		math.floor(getNum(maxResultsSlider, 15)),
-		typesStr
-	)
-
-	-- Call API
-	local ok, response = pcall(network.get, scanUrl)
-
-	if ok and response and type(response) == "string" and response ~= "" and response ~= "null" then
-		local parsed = parseScanResponse(response)
-		if #parsed > 0 or response:find('"results"') then
-			scanResults = parsed
-			rateLimited = false
-			rateLimitedWarned = false
-			serverOnline = true
-			serverWarned = false
-			if getBool(notifyToggle, true) then
-				client.notify(string.format("Scan complete! %d structures found", #scanResults))
-			end
-		elseif isRateLimited(response) then
-			rateLimited = true
-			serverOnline = true
-			serverWarned = false
-			if not rateLimitedWarned then
-				rateLimitedWarned = true
-				log("SeedFinder: Rate limited (60 requests/min). Keeping previously scanned structures.")
-				client.notify("SeedFinder: Rate limited! Max 60 requests per minute. Keeping previous results.")
-			end
-		else
-			if not serverWarned then
-				serverWarned = true
-				log("SeedFinder: Failed to reach server at " .. SERVER_URL)
-			end
-			serverOnline = false
-			rateLimited = false
-		end
-	else
-		if not serverWarned then
-			serverWarned = true
-			log("SeedFinder: Failed to reach server at " .. SERVER_URL)
-		end
-		serverOnline = false
-		rateLimited = false
-	end
-
-	needsRescan = false
+	fireScanRequest()
 end
 
 -- ============================================================================
--- Section 6: RenderEvent Handler
+-- Section 7: RenderEvent Handler
 -- ============================================================================
 
 local function onRender()
@@ -437,6 +477,8 @@ local function onRender()
 	end
 
 	ImGui.Text("--------------------------------")
+	ImGui.Text("Server: " .. SERVER_URL)
+	ImGui.Text("Leave the Server URL field empty to connect to the hosted server!")
 	ImGui.Text("Max 60 requests per minute.")
 	ImGui.Text("Check mineseedfinder.vercel.app for possible updates! 😊")
 	ImGui.Text("If you really like this project, give a star on our GitHub!")
@@ -446,27 +488,23 @@ local function onRender()
 end
 
 -- ============================================================================
--- Section 7: Module Lifecycle
+-- Section 8: Module Lifecycle
 -- ============================================================================
 
 function onLoad()
-	log("SeedFinder loaded (HTTP Bridge Edition)")
-	log("Make sure seedfinder_server.py is running on " .. SERVER_URL)
+	log("SeedFinder loaded")
+	log("Server URL field empty = hosted API at " .. HOSTED_URL)
 end
 
 function onEnable()
 	needsRescan = true
 	lastDimension = ""
 	scanResults = {}
+	statusRequestInFlight = false
+	scanRequestInFlight = false
+	lastServerCheck = 0 -- force an immediate status check on the next tick
 
-	-- Check server availability
-	if not checkServer() then
-		if not serverWarned then
-			serverWarned = true
-			log("SeedFinder: Server offline at " .. SERVER_URL .. ". Start seedfinder_server.py first.")
-		end
-		return
-	end
+	checkServerAsync()
 end
 
 function onDisable()
@@ -475,7 +513,7 @@ function onDisable()
 end
 
 -- ============================================================================
--- Section 8: Chat Commands
+-- Section 9: Chat Commands
 -- ============================================================================
 
 registerCommand("seedscan", function()

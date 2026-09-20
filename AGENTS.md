@@ -18,12 +18,9 @@ Flarial Lua Script  ──HTTP──>  Flask API (127.0.0.1:7890)  ──ctypes�
    (ImGui overlay)               (loads DLL/.so, JSON I/O)                (links cubiomes + Bfinders)
 ```
 
-There are **two Flarial Lua modules** in `script/` — both are structurally identical (the file diff is only server URLs and log strings):
+There is a **single Flarial Lua module** in `script/`:
 
-- `script/SeedFinder.lua` — **HTTP Bridge Edition**: points at the local `http://127.0.0.1:7890` server, the packaged Windows path (with `SeedFinder.exe`).
-- `script/WHSeedFinder.lua` — **Hosted API Edition**: points at `https://mineseedfinder.vercel.app`.
-
-If you edit the scan/UI logic or `STRUCTURE_TYPES` in one, mirror it in the other — keeping them out of sync is a real footgun.
+- `script/SeedFinder.lua` — points at `https://mineseedfinder.vercel.app` (hosted API) when the **Server URL** field is left empty, or at whatever URL the user types (e.g. the local `http://127.0.0.1:7890` server, the packaged Windows path with `SeedFinder.exe`).
 
 1. **C core** (`core/`) — Structure-finding engine. Two parallel implementations:
    - `core/seedfinder_wrapper.c` — plain C entry point exported as `seedfinder_scan`, `seedfinder_free_result`, `seedfinder_status`. This is what the Python server loads. It also holds the entire **SeedCrackerX** engine (`seedfinder_crack`) — see "SeedCrackerX" below.
@@ -154,15 +151,14 @@ The `build-lib` GitHub Actions workflow (manual trigger) is **out of date**. It 
 - `server/app/console.py` — ASCII startup banner + ANSI/UTF-8 console setup for `SeedFinder.exe` / `start.bat`
 - `server/index.py` — WSGI shim (`app` for the frozen exe + `--lib-path/--port/--host` CLI for local dev; port also via `SEEDFINDER_PORT` env); calls `console.print_banner` on local runs
 - `server/build_exe.py` — PyInstaller builder; bundles the DLL plus the `logo/` icon into `server/dist/SeedFinder.exe` (single-file, `--console`). There are no `templates/` or `static/` dirs anymore — deleted with Vercel.
-- `script/SeedFinder.lua` — `STRUCTURE_TYPES` map (string ↔ int ID), `STRUCTURE_ICONS`, ImGui rendering (local HTTP Bridge Edition; see "Architecture")
-- `script/WHSeedFinder.lua` — same module, Hosted API Edition (points at `https://mineseedfinder.vercel.app`, the external `mineseedfinder` repo)
+- `script/SeedFinder.lua` — `STRUCTURE_TYPES` map (string ↔ int ID), `STRUCTURE_ICONS`, ImGui rendering; empty Server URL = hosted API, otherwise the typed URL (see "Architecture")
 - `ChunkBiomesGUI/cubiomes/` — vendored cubiomes source; `ChunkBiomesGUI/Bfinders.c` — Bedrock-specific structure overrides, compiled in statically; `ChunkBiomesGUI/Brng.h` — Bedrock RNG (see the PURE_FUNC gotcha under "SeedCrackerX WASM")
 - `wasm/{CMakeLists.txt,build_wasm.bat,.sh,test_wasm.mjs,INTEGRATION.md}` — the browser SeedCrackerX build (gitignored tree); `wasm/INTEGRATION.md` is its reference doc
 - `build_server/seedfinder_lib.dll` — the build artifact `/scan` loads, produced by `server/start.bat` into `build_server/` (gitignored)
 
 ## Conventions worth knowing
 
-- **Structure type IDs** are integers defined by cubiomes; the Lua modules keep the canonical human-readable list in `STRUCTURE_TYPES`. If you add a structure type, update **all three** places — `STRUCTURE_TYPES` in `SeedFinder.lua` **and** `WHSeedFinder.lua`, and verify cubiomes recognises the ID via `getBedrockStructureConfig`. The `/scan` endpoint's `types=` param is a comma-separated list of these IDs. SeedCrackerX keeps its own crackable-type list (`STRUCTURE_NAMES` in `server/app/seedcracker.py`) — a scan-only type does not automatically become crackable.
+- **Structure type IDs** are integers defined by cubiomes; the Lua module keeps the canonical human-readable list in `STRUCTURE_TYPES`. If you add a structure type, update `STRUCTURE_TYPES` in `SeedFinder.lua` and verify cubiomes recognises the ID via `getBedrockStructureConfig`. The `/scan` endpoint's `types=` param is a comma-separated list of these IDs. SeedCrackerX keeps its own crackable-type list (`STRUCTURE_NAMES` in `server/app/seedcracker.py`) — a scan-only type does not automatically become crackable.
 - Native-lib loading is best-effort and never raises during import. CLI runs (`index.py main` → `native.load_lib`) `sys.exit(1)` when the lib is missing or fails to load, so `server/start.bat` exits early. If the lib never loads, `/scan` returns 503 and `/status` returns 500. Always rebuild with `server/start.bat` rather than running `index.py` alone after a clean.
 - `seedfinder_scan` returns a pointer that the caller **must free via `seedfinder_free_result`**. Servers do this in a `finally` block — keep that ordering if refactoring.
 - **Input clamps on `/scan`**: `radius = min(radius, 1000)` and `max_results = min(max_results, 1000)` to prevent DoS via large iter regions. Keep these limits in place across all entrypoints.
