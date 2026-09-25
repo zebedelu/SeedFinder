@@ -1,6 +1,6 @@
 """API blueprint — /status health check and /scan structure search.
 
-Scan routes (GET; POST lands in the next task):
+Scan routes (GET query string, or POST with a JSON object body):
   /scan          edition from the `version` param (default bedrock,
                  first-letter rule: j… -> java, b… -> bedrock)
   /scan/java     Java fixed (path wins; `version` silently ignored)
@@ -29,8 +29,21 @@ def status():
 
 
 def _param_source():
-    """Params for the current verb. GET reads the query string only."""
-    return request.args
+    """GET reads the query string; POST reads only the JSON body.
+
+    Same keys either way. A non-empty body that is not a JSON object
+    raises ValueError -> 400. Empty/absent body -> all defaults.
+    """
+    if request.method != "POST":
+        return request.args
+    raw = request.get_data(cache=True)
+    if not raw:
+        return {}
+    body = request.get_json(silent=True, force=True)
+    if not isinstance(body, dict):
+        raise ValueError("POST body must be a JSON object with the same "
+                         "keys as the query string")
+    return body
 
 
 def _scan(fixed_edition):
@@ -45,14 +58,28 @@ def _scan(fixed_edition):
                         "missing_or_invalid": missing}), 400
 
     def _arg(name, default, cast):
-        raw = source.get(name, "").strip()
-        if not raw:
+        if name not in source:
             missing.append(name)
             return default
-        try:
-            return cast(raw)
-        except ValueError:
+        raw = source[name]
+        if isinstance(raw, bool) or raw is None:
             raise ValueError(f"invalid value for {name!r}: {raw!r}")
+        if isinstance(raw, str):
+            raw = raw.strip()
+            if not raw:
+                missing.append(name)
+                return default
+            try:
+                return cast(raw)
+            except ValueError:
+                raise ValueError(f"invalid value for {name!r}: {raw!r}")
+        # Native JSON types (POST body): int for int casts, int|float for
+        # float casts; anything else is a type error.
+        if cast is int and isinstance(raw, int):
+            return raw
+        if cast is float and isinstance(raw, (int, float)):
+            return float(raw)
+        raise ValueError(f"invalid value for {name!r}: {raw!r}")
 
     # Edition resolution: fixed path wins and ignores `version`; on /scan
     # the first letter decides (j -> java, b -> bedrock), default bedrock.
@@ -81,13 +108,16 @@ def _scan(fixed_edition):
         player_z = _arg("z", 0.0, float)
         radius = min(_arg("radius", 100, int), 1000)
         max_results = min(_arg("max", 20, int), 1000)
-        types_str = source.get("types", "5").strip() or "5"
     except ValueError as e:
         return jsonify({"error": f"Invalid parameter: {e}",
                         "missing_or_invalid": missing}), 400
 
     # Surface missing args but still serve a result.
+    types_raw = source.get("types", "5")
     try:
+        if isinstance(types_raw, bool) or not isinstance(types_raw, str):
+            raise ValueError("not a string")
+        types_str = types_raw.strip() or "5"
         types_list = [int(t.strip()) for t in types_str.split(",") if t.strip()]
     except ValueError:
         return jsonify({
@@ -159,16 +189,16 @@ def _scan(fixed_edition):
     return jsonify(result)
 
 
-@api_bp.route("/scan")
+@api_bp.route("/scan", methods=["GET", "POST"])
 def scan():
     return _scan(None)
 
 
-@api_bp.route("/scan/java")
+@api_bp.route("/scan/java", methods=["GET", "POST"])
 def scan_java():
     return _scan("java")
 
 
-@api_bp.route("/scan/bedrock")
+@api_bp.route("/scan/bedrock", methods=["GET", "POST"])
 def scan_bedrock():
     return _scan("bedrock")

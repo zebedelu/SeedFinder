@@ -31,6 +31,9 @@ def main():
     test_all_17_ids_java()
     test_negative_seed()
     test_stale_lib_503()
+    test_post_get_parity()
+    test_post_edition_rules()
+    test_post_malformed_bodies()
     print("scan API GET tests OK")
 
 
@@ -113,6 +116,85 @@ def test_stale_lib_503():
         # 500 (broken lib) which is acceptable; only Java's 503 is asserted.
     finally:
         native.lib = real
+
+
+POST_PAYLOAD = {"seed": 31415, "x": 0, "z": 0, "radius": 100,
+                "max": 50, "types": "5,8,9"}
+
+
+def test_post_get_parity():
+    g = get("/scan", **BASE).get_json()
+    p = client.post("/scan", json=POST_PAYLOAD)
+    assert p.status_code == 200, (p.status_code, p.get_json())
+    assert p.get_json() == g, "GET and POST must return identical results"
+
+    g = get("/scan/java", **BASE).get_json()
+    p = client.post("/scan/java", json=POST_PAYLOAD)
+    assert p.status_code == 200, (p.status_code, p.get_json())
+    assert p.get_json() == g
+
+    g = get("/scan/bedrock", **BASE).get_json()
+    p = client.post("/scan/bedrock", json=POST_PAYLOAD)
+    assert p.status_code == 200, (p.status_code, p.get_json())
+    assert p.get_json() == g
+
+
+def test_post_edition_rules():
+    # path wins: version in the body is silently ignored
+    a = client.post("/scan/java", json={**POST_PAYLOAD, "version": "bedrock"})
+    b = client.post("/scan/java", json=POST_PAYLOAD)
+    assert a.get_json() == b.get_json(), "version must be ignored on POST /scan/java"
+
+    # first-letter rule on POST /scan
+    jav = client.post("/scan", json={**POST_PAYLOAD, "version": "jova"})
+    bed = client.post("/scan", json={**POST_PAYLOAD, "version": "bedrock"})
+    ref_j = client.post("/scan/java", json=POST_PAYLOAD)
+    ref_b = client.post("/scan/bedrock", json=POST_PAYLOAD)
+    assert jav.get_json() == ref_j.get_json()
+    assert bed.get_json() == ref_b.get_json()
+
+    # bad first letter -> 400
+    r = client.post("/scan", json={**POST_PAYLOAD, "version": "x"})
+    assert r.status_code == 400
+    assert r.get_json()["missing_or_invalid"] == ["version"]
+
+    # non-string version -> 400
+    r = client.post("/scan", json={**POST_PAYLOAD, "version": 123})
+    assert r.status_code == 400
+    assert r.get_json()["missing_or_invalid"] == ["version"]
+
+
+def test_post_malformed_bodies():
+    # non-object JSON body -> 400
+    r = client.post("/scan", json=[1, 2, 3])
+    assert r.status_code == 400, r.status_code
+    r = client.post("/scan", data="not json",
+                    content_type="application/json")
+    assert r.status_code == 400, r.status_code
+    # form-encoded non-empty body -> 400 (POST is JSON-body only)
+    r = client.post("/scan", data="seed=1",
+                    content_type="application/x-www-form-urlencoded")
+    assert r.status_code == 400, r.status_code
+
+    # empty/absent body -> defaults, 200
+    r = client.post("/scan")
+    assert r.status_code == 200, r.status_code
+
+    # types must be a string in JSON (comma-separated, like the query string)
+    r = client.post("/scan", json={"types": [5, 8, 9]})
+    assert r.status_code == 400
+    assert "comma-separated" in r.get_json()["error"]
+    r = client.post("/scan", json={"types": 5})
+    assert r.status_code == 400
+
+    # bool rejected for numeric params
+    r = client.post("/scan", json={"seed": True})
+    assert r.status_code == 400, r.status_code
+
+    # native JSON numbers accepted (int seed, int x/z)
+    r = client.post("/scan/java", json={"seed": 8675309, "x": 0, "z": 0,
+                                        "radius": 50, "max": 5, "types": "5"})
+    assert r.status_code == 200, (r.status_code, r.get_json())
 
 
 if __name__ == "__main__":
