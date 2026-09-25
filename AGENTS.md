@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-SeedFinder is a Minecraft Bedrock Edition structure finder that runs as a module inside [Flarial Client](https://flarial.xyz). Given a world seed and the player's position, it locates nearby villages, temples, monuments, ancient cities, etc. — without relying on ChunkBase — by driving [cubiomes](https://github.com/Cubitect/cubiomes) directly.
+SeedFinder is a Minecraft Bedrock Edition **and Java Edition (latest)** structure finder that runs as a module inside [Flarial Client](https://flarial.xyz). Given a world seed and the player's position, it locates nearby villages, temples, monuments, ancient cities, etc. — without relying on ChunkBase — by driving [cubiomes](https://github.com/Cubitect/cubiomes) directly (Bedrock via `Bfinders` overrides, Java via cubiomes' own `getStructurePos`).
 
 `README.md` is the user-facing reference: full API docs (params, response shapes), the supported-structures list, and real benchmark tables (v1.0.0 and v1.2.0). Point users there for API questions instead of re-deriving from code.
 
@@ -23,11 +23,11 @@ There is a **single Flarial Lua module** in `script/`:
 - `script/SeedFinder.lua` — points at `https://mineseedfinder.vercel.app` (hosted API) when the **Server URL** field is left empty, or at whatever URL the user types (e.g. the local `http://127.0.0.1:7890` server, the packaged Windows path with `SeedFinder.exe`).
 
 1. **C core** (`core/`) — Structure-finding engine. Two parallel implementations:
-   - `core/seedfinder_wrapper.c` — plain C entry point exported as `seedfinder_scan`, `seedfinder_free_result`, `seedfinder_status`. This is what the Python server loads. It also holds the entire **SeedCrackerX** engine (`seedfinder_crack`) — see "SeedCrackerX" below.
+   - `core/seedfinder_wrapper.c` — plain C entry point. Exports `seedfinder_scan` (Bedrock, unchanged ABI), `seedfinder_scan_java` (Java; extra `const char *mcLabel` arg, always `NULL` today — the future hook for a Java version param, resolved via cubiomes' `str2mc`), plus `seedfinder_free_result`, `seedfinder_status`. Both scans share one internal loop, `scan_impl(..., edition, mcLabel)` (in `core/seedfinder_wrapper.c`), with 4 edition dispatch points: `setupGenerator` mc, structure config, placer (`getBedrockStructurePos` vs `getStructurePos`), biome gate (`structureIsViable` vs `isViableStructurePos`). This is what the Python server loads. It also holds the entire **SeedCrackerX** engine (`seedfinder_crack`) — see "SeedCrackerX" below.
    - `core/SeedFinderBridge.cpp` / `.h` — alternative C++ entry point that registers a `seedfinder_bridge` Lua global inside a Lua state (for an in-process Flarial DLL injection path that is **not** built by the current `start.bat` target — see "Two build trees" below).
    Both share the same algorithm: iterate regions = `floor(playerChunk ± radius) / regionSize`, call `getBedrockStructurePos`, run `isViableBedrockStructurePos` for the biome filter, sort by distance. Floor-div helper is duplicated in both files. `seedfinder_wrapper.c` additionally special-cases **Outpost**: it re-samples the biome at the outpost's own placement cell (offset from the structure position) because cubiomes' upstream Java-style gate lets positions sitting on swamp/river biomes through.
 
-2. **HTTP server** (`server/`) — Flask + flask-cors, loads the native library via `ctypes.CDLL`. Blueprints in `server/app/`: `api.py` (`GET /status` aliased as `GET /health`, `GET /scan?seed=…&x=…&z=…&radius=…&max=…&types=1,5,10`), `seedcracker.py` (the `/seedcracker` reverse-seed-search API), `pages.py` (a **single** `/` landing page with copy-paste API examples — the SEO/doc routes and HTML templates were deleted with the Vercel deployment). Reads the malloc'd JSON in the C side, calls `seedfinder_free_result` to release it.
+2. **HTTP server** (`server/`) — Flask + flask-cors, loads the native library via `ctypes.CDLL`. Blueprints in `server/app/`: `api.py` (`GET /status` aliased as `GET /health`; scan routes `GET|POST /scan`, `GET|POST /scan/java`, `GET|POST /scan/bedrock` — params `seed/x/z/radius/max/types` plus `version` on `/scan` only), `seedcracker.py` (the `/seedcracker` reverse-seed-search API), `pages.py` (a **single** `/` landing page with copy-paste API examples — the SEO/doc routes and HTML templates were deleted with the Vercel deployment). Reads the malloc'd JSON in the C side, calls `seedfinder_free_result` to release it.
 
 3. **Flarial Lua module** (`script/SeedFinder.lua`) — Runs inside Flarial Client. Pings `http://127.0.0.1:7890/status` (5 s throttle), then calls `/scan`. Renders an ImGui overlay with structure type toggles and results sorted by distance. Reads the player's current seed/position from the Flarial runtime. Drop into `%LOCALAPPDATA%\Flarial\Client\Scripts\Modules\SeedFinder.lua` to load (see `script/INSTALL.txt`).
 
@@ -142,10 +142,10 @@ The `build-lib` GitHub Actions workflow (manual trigger) is **out of date**. It 
 
 ## Key files
 
-- `core/seedfinder_wrapper.c` — the export surface the server actually calls (`seedfinder_scan`, `seedfinder_free_result`, `seedfinder_status`, `seedfinder_crack`)
+- `core/seedfinder_wrapper.c` — the export surface the server actually calls (`seedfinder_scan`, `seedfinder_scan_java`, `seedfinder_free_result`, `seedfinder_status`, `seedfinder_crack`)
 - `server/app/native.py` — ctypes signature table + `_candidates()` auto-discovery of the native lib (`.dll`/`.so`); `seedfinder_crack` is bound **only if the symbol exists** (`hasattr`), so a stale lib (pre-SeedCrackerX) degrades instead of killing the app at import
 - `server/app/__init__.py` — `create_app()` factory; `native.bootstrap_lib()` at import
-- `server/app/api.py` — `/status` (alias `/health`), `/scan` (`_arg()` helper applies defaults and surfaces `missing_or_invalid`)
+- `server/app/api.py` — `/status` (alias `/health`), the three scan routes (`/scan`, `/scan/java`, `/scan/bedrock`, GET+POST); `_scan(fixed_edition)` is the shared handler
 - `server/app/seedcracker.py` — `/seedcracker` blueprint (API only, `_parse()` for the payload forms); see "SeedCrackerX"
 - `server/app/pages.py` — a single `/` landing page with inline HTML: interactive forms for both `/scan` and `/seedcracker` plus copy-paste curl/Python examples; the previous SEO/doc routes were removed with the Vercel deployment
 - `server/app/console.py` — ASCII startup banner + ANSI/UTF-8 console setup for `SeedFinder.exe` / `start.bat`
@@ -158,6 +158,7 @@ The `build-lib` GitHub Actions workflow (manual trigger) is **out of date**. It 
 
 ## Conventions worth knowing
 
+- **Edition dispatch**: `/scan/java` and `/scan/bedrock` fix the edition and **silently ignore** `version`; `/scan` resolves `version` by its **first letter** (`j…` → java, `b…` → bedrock, case-insensitive; anything else → 400; absent → `bedrock`). GET reads the query string, POST reads only the JSON body (same keys; non-object body → 400). The response shape is identical across editions. `native.py` binds `seedfinder_scan_java` only `if hasattr` so a stale lib degrades to a 503 **only** when Java is requested. The `mcLabel` C argument is always `NULL` from the server — a future Java version param wires into it (`str2mc`); do not add that param without a new task.
 - **Structure type IDs** are integers defined by cubiomes; the Lua module keeps the canonical human-readable list in `STRUCTURE_TYPES`. If you add a structure type, update `STRUCTURE_TYPES` in `SeedFinder.lua` and verify cubiomes recognises the ID via `getBedrockStructureConfig`. The `/scan` endpoint's `types=` param is a comma-separated list of these IDs. SeedCrackerX keeps its own crackable-type list (`STRUCTURE_NAMES` in `server/app/seedcracker.py`) — a scan-only type does not automatically become crackable.
 - Native-lib loading is best-effort and never raises during import. CLI runs (`index.py main` → `native.load_lib`) `sys.exit(1)` when the lib is missing or fails to load, so `server/start.bat` exits early. If the lib never loads, `/scan` returns 503 and `/status` returns 500. Always rebuild with `server/start.bat` rather than running `index.py` alone after a clean.
 - `seedfinder_scan` returns a pointer that the caller **must free via `seedfinder_free_result`**. Servers do this in a `finally` block — keep that ordering if refactoring.

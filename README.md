@@ -5,15 +5,15 @@
 <h1 align="center">SeedFinder</h1>
 
 <p align="center">
-  <b>Find Minecraft Bedrock structures - as a REST API, and as an overlay inside Flarial Client.</b>
+  <b>Find Minecraft Bedrock and Java structures - as a REST API, and as an overlay inside Flarial Client.</b>
 </p>
 
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue">
-  <img alt="Platform" src="https://img.shields.io/badge/platform-Minecraft%20Bedrock-4c1">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Minecraft%20Bedrock%20%2B%20Java-4c1">
 </p>
 
-SeedFinder looks up nearby Minecraft **Bedrock Edition** structures - villages, buried treasure, ancient cities, ocean monuments, and so on - given a world seed and a player position. Under the hood it's a small C engine built on [cubiomes](https://github.com/Cubitect/cubiomes) plus Bedrock-specific structure math, exposed over HTTP, and hooked into an overlay module for [Flarial Client](https://flarial.xyz).
+SeedFinder looks up nearby Minecraft **Bedrock Edition** and **Java Edition** structures - villages, buried treasure, ancient cities, ocean monuments, and so on - given a world seed and a player position. Under the hood it's a small C engine built on [cubiomes](https://github.com/Cubitect/cubiomes) plus Bedrock-specific structure math, exposed over HTTP, and hooked into an overlay module for [Flarial Client](https://flarial.xyz).
 
 You can call the hosted API directly from any language, or drop the Lua module into Flarial and get structures listed in-game, sorted by distance, without touching a browser-based seed map.
 
@@ -46,19 +46,20 @@ You can call the hosted API directly from any language, or drop the Lua module i
 
 | Component | Language | Role |
 |---|---|---|
-| `core/` | C (+ an experimental C++ bridge) | Wraps cubiomes and Bedrock structure math into a shared library (`seedfinder_lib.dll` / `.so`) |
+| `core/` | C (+ an experimental C++ bridge) | Wraps cubiomes and Bedrock/Java structure math into a shared library (`seedfinder_lib.dll` / `.so`) |
 | `server/` | Python (Flask) | Loads that library with `ctypes`, exposes it over HTTP |
 | `script/` | Lua | Runs inside Flarial Client, calls the API, draws the ImGui overlay |
 
-Target platform is Minecraft Bedrock Edition, 1.18 through the latest release. Most players just want the packaged Windows workflow (`SeedFinder.exe` + Lua script); the API underneath is plain HTTP and doesn't care what OS or language is calling it.
+Target platform is Minecraft Bedrock Edition (1.18 through the latest release) and Minecraft Java Edition (latest release - `/scan/java`, powered directly by cubiomes' Java placement). Most players just want the packaged Windows workflow (`SeedFinder.exe` + Lua script); the API underneath is plain HTTP and doesn't care what OS or language is calling it.
 
 ## Features
 
 - **Native scan engine.** The actual search runs in compiled C against cubiomes, not Lua or Python, so it stays fast even at large radii - see [Benchmarks](#benchmarks) for real numbers.
-- **Plain REST API.** One `GET /scan` endpoint, query-string parameters in, JSON out. No SDK, no auth.
+- **Plain REST API.** Three scan endpoints - `/scan`, `/scan/java`, `/scan/bedrock` - each accepting **GET** (query string) and **POST** (JSON body, same keys). No SDK, no auth.
+- **Bedrock and Java in one API.** The same 17 structure types are predicted for both editions; `/scan` picks the edition with `version=java`/`bedrock` (default `bedrock`), or use the fixed `/scan/java` / `/scan/bedrock` paths. Java always targets the latest release.
 - **Official site.** The app is live at `https://mineseedfinder.vercel.app` - a free hosted instance you can call without building or running anything yourself.
 - **In-game overlay for Flarial Client**, results sorted by distance, rendered with ImGui.
-- **15 working structure types** - villages, temples, ocean structures, ancient cities, mansions, portals, and more. Full list [below](#supported-structures).
+- **17 working structure types** - villages, temples, ocean structures, ancient cities, mansions, portals, and more. Full list [below](#supported-structures).
 - **Multi-type queries** - ask for several structures in one request (`types=5,8,9`) instead of one call per type.
 - **SeedCrackerX (reverse seed search)** - give at least 4 structures with coordinates and get the most probable Bedrock seed back. Sweeps the 32-bit seed space in parallel in native C inside a time budget. Runs on the local API - see [SeedCrackerX](#seedcrackerx-reverse-seed-search).
 - **No dependencies for players.** The packaged `.exe` bundles the server itself; no Python or pip needed on the player's machine.
@@ -222,7 +223,16 @@ curl -X POST http://127.0.0.1:7890/seedcracker \
 {"status": "ok"}
 ```
 
-### `GET /scan`
+### `GET|POST /scan`, `/scan/java`, `/scan/bedrock`
+
+All three scan endpoints accept **GET** (query string) and **POST** (JSON
+body with the same keys - no query-string fallback on POST):
+
+| Endpoint | Edition |
+|---|---|
+| `/scan` | from the `version` param - default `bedrock` |
+| `/scan/bedrock` | Bedrock, fixed |
+| `/scan/java` | Java, fixed |
 
 | Param | Type | Default | Notes |
 |---|---|---|---|
@@ -231,7 +241,23 @@ curl -X POST http://127.0.0.1:7890/seedcracker \
 | `z` | float | `0` | Player Z block position. |
 | `radius` | integer | `100` | Search radius in **chunks**. |
 | `max` | integer | `20` | Max results returned, sorted by distance ascending. |
-| `types` | string | `"5"` | Comma-separated [structure IDs](#supported-structures), e.g. `"5,8,9"`. |
+| `types` | string | `"5"` | Comma-separated [structure IDs](#supported-structures), e.g. `"5,8,9"`. In JSON bodies it must be the same comma-separated **string** (not an array). |
+| `version` | string | `"bedrock"` | `java` or `bedrock`, resolved by the **first letter** (`j…` / `b…`, case-insensitive) - so a typo like `jova` still counts as Java. Any other first letter -> 400. Only used by `/scan`; `/scan/java` and `/scan/bedrock` silently ignore it. |
+
+```bash
+# GET, Bedrock (default)
+curl "https://mineseedfinder.vercel.app/scan?seed=31415&x=0&z=0&radius=100&max=50&types=5,8,9"
+
+# GET, Java
+curl "https://mineseedfinder.vercel.app/scan/java?seed=31415&x=0&z=0&radius=100&max=50&types=5,8,9"
+
+# POST, Java (JSON body, same keys)
+curl -X POST "https://mineseedfinder.vercel.app/scan" \
+  -H "Content-Type: application/json" \
+  -d '{"seed": 31415, "x": 0, "z": 0, "radius": 100, "max": 50, "types": "5,8,9", "version": "java"}'
+```
+
+Response (identical shape for both editions):
 
 ```json
 {
@@ -246,11 +272,17 @@ curl -X POST http://127.0.0.1:7890/seedcracker \
 Error responses:
 
 ```jsonc
-// 400 - bad value, e.g. seed=abc
-{ "error": "Invalid parameter: invalid literal for int() with base 10: 'abc'" }
+// 400 - bad value, e.g. seed=abc  (also: version starting with neither j nor b)
+{ "error": "Invalid parameter: invalid value for 'seed': 'abc'", "missing_or_invalid": ["seed"] }
+
+// 400 - POST body is not a JSON object
+{ "error": "Invalid parameter: POST body must be a JSON object with the same keys as the query string" }
 
 // 503 - native library failed to load (hosted only, if the build didn't ship the .so)
 { "error": "SeedFinder native library (.so) not loaded on this server.", "results": [] }
+
+// 503 - /scan/java against a library built before Java support
+{ "error": "SeedFinder native library has no Java scan support.", "hint": "rebuild the native library — Java scan support missing", "results": [] }
 ```
 
 All deployments run the same app package, so behavior is identical everywhere: `radius` and `max` are clamped to `1000`, and a `missing_or_invalid` array lists any params that had to be defaulted (e.g. a stray `radius=50000` is capped rather than let through).
@@ -292,6 +324,8 @@ Confirmed by calling `/scan` for every ID against a real seed at a large radius:
 | 12 | Ruined Portal (Nether) | ✅ | | | |
 
 17 of the 19 listed IDs are supported. Desert Well (`16`) and Amethyst Geode (`17`) are **not supported**: those are per-chunk placement features, not region-based structures, and the engine has no Bedrock prediction for them - see [Roadmap](#roadmap).
+
+The same 17 IDs apply to the Java edition (`/scan/java` and `/scan?version=java`); the ID table is shared between editions.
 
 Bastion Remnant, Nether Fortress, and End City aren't exposed under any ID yet, though their structure configs already exist in the engine - see [Roadmap](#roadmap).
 
