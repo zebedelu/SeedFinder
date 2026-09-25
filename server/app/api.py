@@ -112,6 +112,15 @@ def _scan(fixed_edition):
         }), 503
 
     # Call C function — returns void pointer to malloc'd JSON string
+    args = (
+        ctypes.c_uint64(seed & 0xFFFFFFFFFFFFFFFF),
+        ctypes.c_double(player_x),
+        ctypes.c_double(player_z),
+        ctypes.c_int(radius),
+        ctypes.c_int(max_results),
+        c_types,
+        ctypes.c_int(num_types),
+    )
     try:
         if edition == "java":
             fn = getattr(native.lib, "seedfinder_scan_java", None)
@@ -122,26 +131,9 @@ def _scan(fixed_edition):
                     "missing_or_invalid": missing,
                     "results": [],
                 }), 503
-            raw_ptr = fn(
-                ctypes.c_uint64(seed & 0xFFFFFFFFFFFFFFFF),
-                ctypes.c_double(player_x),
-                ctypes.c_double(player_z),
-                ctypes.c_int(radius),
-                ctypes.c_int(max_results),
-                c_types,
-                ctypes.c_int(num_types),
-                None,  # mcLabel -> MC_NEWEST (future version param)
-            )
+            raw_ptr = fn(*args, None)  # mcLabel -> MC_NEWEST (future version param)
         else:
-            raw_ptr = native.lib.seedfinder_scan(
-                ctypes.c_uint64(seed & 0xFFFFFFFFFFFFFFFF),
-                ctypes.c_double(player_x),
-                ctypes.c_double(player_z),
-                ctypes.c_int(radius),
-                ctypes.c_int(max_results),
-                c_types,
-                ctypes.c_int(num_types),
-            )
+            raw_ptr = native.lib.seedfinder_scan(*args)
     except Exception as e:
         return jsonify({"error": f"Scan failed: {e}",
                         "missing_or_invalid": missing}), 500
