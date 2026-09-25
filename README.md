@@ -13,7 +13,7 @@
   <img alt="Platform" src="https://img.shields.io/badge/platform-Minecraft%20Bedrock%20%2B%20Java-4c1">
 </p>
 
-SeedFinder looks up nearby Minecraft **Bedrock Edition** and **Java Edition** structures - villages, buried treasure, ancient cities, ocean monuments, and so on - given a world seed and a player position. Under the hood it's a small C engine built on [cubiomes](https://github.com/Cubitect/cubiomes) plus Bedrock-specific structure math, exposed over HTTP, and hooked into an overlay module for [Flarial Client](https://flarial.xyz).
+SeedFinder looks up nearby Minecraft **Bedrock Edition** and **Java Edition** structures - villages, buried treasure, ancient cities, ocean monuments, and so on - given a world seed and a player position. Under the hood it's a small C engine built on [cubiomes](https://github.com/Cubitect/cubiomes) (Java placement) plus Bedrock-specific structure overrides, exposed over HTTP, and hooked into an overlay module for [Flarial Client](https://flarial.xyz).
 
 You can call the hosted API directly from any language, or drop the Lua module into Flarial and get structures listed in-game, sorted by distance, without touching a browser-based seed map.
 
@@ -395,7 +395,7 @@ Compared to a Lua- or Python-only structure finder: the search itself runs in co
 
 Compared to needing your own backend: the hosted API is free and public, so a small tool or bot can integrate without anyone standing up infrastructure for it.
 
-And the honest tradeoff: this is a Bedrock-specific, Flarial-specific project with a Windows-first packaged path. If you want Java Edition seed finding, or a fully cross-platform native client rather than an HTTP API, [ChunkBiomesGUI](https://github.com/Nel-S/ChunkBiomes) or [cubiomes](https://github.com/Cubitect/cubiomes) directly might suit you better - SeedFinder is really this project's packaging of that same engine for Flarial users and API consumers.
+And the honest tradeoff: this is a Flarial-specific project with a Windows-first packaged path and a web API. If you want a native desktop GUI rather than an HTTP API, [ChunkBiomesGUI](https://github.com/Nel-S/ChunkBiomes) or [cubiomes](https://github.com/Cubitect/cubiomes) directly might suit you better - SeedFinder is really this project's packaging of that same engine for Flarial users and API consumers.
 
 ## Roadmap
 
