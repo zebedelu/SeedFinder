@@ -148,8 +148,8 @@ Flarial Lua Script  --HTTP-->  Flask server  --ctypes-->  seedfinder_lib (.so / 
    (in Minecraft)               (port 7890)                  (compiled from core/)
 ```
 
-1. **C core** (`core/`) - `seedfinder_wrapper.c` links cubiomes statically and implements `seedfinder_scan()`. For each requested structure type it walks the relevant grid regions around the player within `radius`, checks biome viability, computes distance, sorts, caps at `max`, and returns a hand-built JSON string across the ABI boundary (freed afterward with `seedfinder_free_result`). Biome viability is checked the way Bedrock does it - at the structure's own cell (`bedrockViableBiome` in `core/viability.c`) - not through cubiomes' Java-style bounding-box gate, which let positions sitting on rivers/swamps/oceans pass as villages.
-2. **HTTP server** (`server/`) - a single Flask app package (`server/app/`) loads that shared library and exposes `/status` and `/scan`. One codebase serves every deployment: `server/index.py` is the WSGI entry, the same file runs locally on Windows and Linux via `server/start.bat` / `server/start.sh`, and it's what gets frozen into `SeedFinder.exe` by `server/build_exe.py`.
+1. **C core** (`core/`) - `seedfinder_wrapper.c` links cubiomes statically and implements the shared scan loop (`scan_impl`) behind two exports: `seedfinder_scan()` (Bedrock) and `seedfinder_scan_java()` (Java). For each requested structure type it walks the relevant grid regions around the player within `radius`, checks biome viability, computes distance, sorts, caps at `max`, and returns a hand-built JSON string across the ABI boundary (freed afterward with `seedfinder_free_result`). A flag switches the placer - Bedrock's `getBedrockStructurePos` vs cubiomes' Java `getStructurePos` - and the matching biome gate: Bedrock checks the structure's own cell (`bedrockViableBiome` in `core/viability.c`), Java uses cubiomes' native `isViableStructurePos`.
+2. **HTTP server** (`server/`) - a single Flask app package (`server/app/`) loads that shared library and exposes `/status` plus the three scan routes `/scan`, `/scan/java` and `/scan/bedrock` (GET and POST on each). One codebase serves every deployment: `server/index.py` is the WSGI entry, the same file runs locally on Windows and Linux via `server/start.bat` / `server/start.sh`, and it's what gets frozen into `SeedFinder.exe` by `server/build_exe.py`.
 3. **Flarial script** (`script/SeedFinder.lua`) - polls `/status`, calls `/scan` with the player's live coordinates, and draws the results in an ImGui panel with a name-to-icon lookup. Leaving the Server URL field empty connects to the hosted API (https://mineseedfinder.vercel.app); entering a URL (e.g. the local `127.0.0.1:7890`) overrides it.
 
 There's also an experimental fourth path in `core/SeedFinderBridge.cpp` / `.h`: a direct Lua↔C bridge meant to be compiled straight into the Flarial Client DLL, cutting out the HTTP hop entirely. It's set up in `CMakeLists.txt` but the shipped Lua script doesn't use it yet - see [Roadmap](#roadmap).
@@ -273,7 +273,7 @@ Error responses:
 
 ```jsonc
 // 400 - bad value, e.g. seed=abc  (also: version starting with neither j nor b)
-{ "error": "Invalid parameter: invalid value for 'seed': 'abc'", "missing_or_invalid": ["seed"] }
+{ "error": "Invalid parameter: invalid value for 'seed': 'abc'", "missing_or_invalid": [] }
 
 // 400 - POST body is not a JSON object
 { "error": "Invalid parameter: POST body must be a JSON object with the same keys as the query string" }
