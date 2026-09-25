@@ -56,7 +56,7 @@ Target platform is Minecraft Bedrock Edition (1.18 through the latest release) a
 
 - **Native scan engine.** The actual search runs in compiled C against cubiomes, not Lua or Python, so it stays fast even at large radii - see [Benchmarks](#benchmarks) for real numbers.
 - **Plain REST API.** Three scan endpoints - `/scan`, `/scan/java`, `/scan/bedrock` - each accepting **GET** (query string) and **POST** (JSON body, same keys). No SDK, no auth.
-- **Bedrock and Java in one API.** The same 17 structure types are predicted for both editions; `/scan` picks the edition with `version=java`/`bedrock` (default `bedrock`), or use the fixed `/scan/java` / `/scan/bedrock` paths. Java always targets the latest release.
+- **Bedrock and Java in one API.** The same 17 structure types are predicted for both editions; `/scan` picks the edition with `mc=java`/`bedrock` (default `bedrock`), or use the fixed `/scan/java` / `/scan/bedrock` paths. Java always targets the latest release.
 - **Official site.** The app is live at `https://mineseedfinder.vercel.app` - a free hosted instance you can call without building or running anything yourself.
 - **In-game overlay for Flarial Client**, results sorted by distance, rendered with ImGui.
 - **17 working structure types** - villages, temples, ocean structures, ancient cities, mansions, portals, and more. Full list [below](#supported-structures).
@@ -230,7 +230,7 @@ body with the same keys - no query-string fallback on POST):
 
 | Endpoint | Edition |
 |---|---|
-| `/scan` | from the `version` param - default `bedrock` |
+| `/scan` | from the `mc` param - default `bedrock` |
 | `/scan/bedrock` | Bedrock, fixed |
 | `/scan/java` | Java, fixed |
 
@@ -242,7 +242,7 @@ body with the same keys - no query-string fallback on POST):
 | `radius` | integer | `100` | Search radius in **chunks**. |
 | `max` | integer | `20` | Max results returned, sorted by distance ascending. |
 | `types` | string | `"5"` | Comma-separated [structure IDs](#supported-structures), e.g. `"5,8,9"`. In JSON bodies it must be the same comma-separated **string** (not an array). |
-| `version` | string | `"bedrock"` | `java` or `bedrock`, resolved by the **first letter** (`j…` / `b…`, case-insensitive) - so a typo like `jova` still counts as Java. Any other first letter -> 400. Only used by `/scan`; `/scan/java` and `/scan/bedrock` silently ignore it. |
+| `mc` | string | `"bedrock"` | `java` or `bedrock`, resolved by the **first letter** (`j…` / `b…`, case-insensitive) - so a typo like `jova` still counts as Java. Any other first letter -> 400. Only used by `/scan`; `/scan/java` and `/scan/bedrock` silently ignore it. The name says edition, not game version: `version` is kept free for a future game-version param. |
 
 ```bash
 # GET, Bedrock (default)
@@ -254,7 +254,7 @@ curl "https://mineseedfinder.vercel.app/scan/java?seed=31415&x=0&z=0&radius=100&
 # POST, Java (JSON body, same keys)
 curl -X POST "https://mineseedfinder.vercel.app/scan" \
   -H "Content-Type: application/json" \
-  -d '{"seed": 31415, "x": 0, "z": 0, "radius": 100, "max": 50, "types": "5,8,9", "version": "java"}'
+  -d '{"seed": 31415, "x": 0, "z": 0, "radius": 100, "max": 50, "types": "5,8,9", "mc": "java"}'
 ```
 
 Response (identical shape for both editions):
@@ -272,7 +272,7 @@ Response (identical shape for both editions):
 Error responses:
 
 ```jsonc
-// 400 - bad value, e.g. seed=abc  (also: version starting with neither j nor b)
+// 400 - bad value, e.g. seed=abc  (also: mc starting with neither j nor b)
 { "error": "Invalid parameter: invalid value for 'seed': 'abc'", "missing_or_invalid": [] }
 
 // 400 - POST body is not a JSON object
@@ -325,7 +325,7 @@ Confirmed by calling `/scan` for every ID against a real seed at a large radius:
 
 17 of the 19 listed IDs are supported. Desert Well (`16`) and Amethyst Geode (`17`) are **not supported**: those are per-chunk placement features, not region-based structures, and the engine has no Bedrock prediction for them - see [Roadmap](#roadmap).
 
-The same 17 IDs apply to the Java edition (`/scan/java` and `/scan?version=java`); the ID table is shared between editions.
+The same 17 IDs apply to the Java edition (`/scan/java` and `/scan?mc=java`); the ID table is shared between editions.
 
 Bastion Remnant, Nether Fortress, and End City aren't exposed under any ID yet, though their structure configs already exist in the engine - see [Roadmap](#roadmap).
 

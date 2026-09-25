@@ -358,8 +358,8 @@ _INDEX_HTML = """<!DOCTYPE html>
   </div>
   <div class="section-desc">
     Find structures around a position, on Bedrock or Java. This sends a <code>GET /scan</code> request with the parameters below.
-    Add <code>"version": "java"</code> to ask for <b>Java</b> structures; without it you get <code>bedrock</code>. Only the first letter counts (<code>j…</code>/<code>b…</code>), so <code>jova</code> works too.
-    The same parameters also go as a JSON body on <code>POST /scan</code>. <code>/scan/java</code> and <code>/scan/bedrock</code> fix the edition and ignore <code>version</code>. Java always targets the latest release.
+    Add <code>"mc": "java"</code> to ask for <b>Java</b> structures; without it you get <code>bedrock</code>. Only the first letter counts (<code>j…</code>/<code>b…</code>), so <code>jova</code> works too.
+    The same parameters also go as a JSON body on <code>POST /scan</code>. <code>/scan/java</code> and <code>/scan/bedrock</code> fix the edition and ignore <code>mc</code>. <code>mc</code> means edition here, not game version; <code>version</code> is reserved for that. Java always targets the latest release.
   </div>
 
   <div class="playground">
@@ -370,7 +370,7 @@ _INDEX_HTML = """<!DOCTYPE html>
   "radius": 100,
   "max": 20,
   "types": "5,1,10",
-  "version": "bedrock"
+  "mc": "bedrock"
 }</textarea>
     <div class="actions">
       <button class="primary" id="scan-go">Search</button>
@@ -382,13 +382,13 @@ _INDEX_HTML = """<!DOCTYPE html>
   <div class="code-examples">
     <div class="code-block">
       <div class="code-head">
-        <span class="label">curl - both (version parameter)</span>
+        <span class="label">curl - both (mc parameter)</span>
         <span class="copy-wrap">
           <span class="copy-msg" hidden>Copied!</span>
           <button type="button" class="copy-btn" data-copy-target="curl-scan">Copy</button>
         </span>
       </div>
-      <pre id="curl-scan">curl "http://127.0.0.1:7890/scan?seed=8675309&amp;x=0&amp;z=0&amp;radius=100&amp;max=20&amp;types=5,1,10&amp;version=bedrock"</pre>
+      <pre id="curl-scan">curl "http://127.0.0.1:7890/scan?seed=8675309&amp;x=0&amp;z=0&amp;radius=100&amp;max=20&amp;types=5,1,10&amp;mc=bedrock"</pre>
     </div>
     <div class="code-block">
       <div class="code-head">
@@ -412,7 +412,7 @@ _INDEX_HTML = """<!DOCTYPE html>
     </div>
     <div class="code-block">
       <div class="code-head">
-        <span class="label">curl - post + version</span>
+        <span class="label">curl - post + mc</span>
         <span class="copy-wrap">
           <span class="copy-msg" hidden>Copied!</span>
           <button type="button" class="copy-btn" data-copy-target="curl-scan-post">Copy</button>
@@ -420,7 +420,7 @@ _INDEX_HTML = """<!DOCTYPE html>
       </div>
       <pre id="curl-scan-post">curl -X POST "http://127.0.0.1:7890/scan" \\
   -H "Content-Type: application/json" \\
-  -d '{"seed": 8675309, "x": 0, "z": 0, "radius": 100, "max": 20, "types": "5,1,10", "version": "java"}'</pre>
+  -d '{"seed": 8675309, "x": 0, "z": 0, "radius": 100, "max": 20, "types": "5,1,10", "mc": "java"}'</pre>
     </div>
     <div class="code-block">
       <div class="code-head">
@@ -449,7 +449,7 @@ data = requests.get(url, params=params).json()
     SeedCracker
   </div>
   <div class="section-desc">
-    Give it the coordinates of 4 or more structures and it searches for a world where those structures land exactly where you placed them. Sends a <code>POST /seedcracker</code> request.
+    Give it the coordinates of 4 or more structures and it searches for a world where those structures land exactly where you placed them. For now it works on Bedrock only; Java is a possibility down the road, and the Bedrock search itself still has room to improve. Sends a <code>POST /seedcracker</code> request.
   </div>
 
   <div class="playground">
@@ -574,7 +574,7 @@ document.getElementById("crack-clear").addEventListener("click", () => {
 wire("scan-go", "scan-out", async () => {
   const p = JSON.parse(document.getElementById("scan-payload").value);
   const q = new URLSearchParams();
-  for (const k of ["seed", "x", "z", "radius", "max", "types", "version"]) {
+  for (const k of ["seed", "x", "z", "radius", "max", "types", "mc"]) {
     if (p[k] !== undefined) q.set(k, p[k]);
   }
   const res = await fetch("/scan?" + q);

@@ -1,10 +1,14 @@
 """API blueprint — /status health check and /scan structure search.
 
 Scan routes (GET query string, or POST with a JSON object body):
-  /scan          edition from the `version` param (default bedrock,
+  /scan          edition from the `mc` param (default bedrock,
                  first-letter rule: j… -> java, b… -> bedrock)
-  /scan/java     Java fixed (path wins; `version` silently ignored)
+  /scan/java     Java fixed (path wins; `mc` silently ignored)
   /scan/bedrock  Bedrock fixed
+
+`mc` picks the edition, never the game version. The name is deliberately
+short so a future game-version param (`version`, e.g. "1.21") can land
+without colliding with it.
 """
 
 import ctypes
@@ -81,15 +85,15 @@ def _scan(fixed_edition):
             return float(raw)
         raise ValueError(f"invalid value for {name!r}: {raw!r}")
 
-    # Edition resolution: fixed path wins and ignores `version`; on /scan
+    # Edition resolution: fixed path wins and ignores `mc`; on /scan
     # the first letter decides (j -> java, b -> bedrock), default bedrock.
     edition = fixed_edition
     if edition is None:
-        raw_version = source.get("version", "")
-        if raw_version is None or raw_version == "":
+        raw_mc = source.get("mc", "")
+        if raw_mc is None or raw_mc == "":
             edition = "bedrock"
         else:
-            first = str(raw_version)[0].lower()
+            first = str(raw_mc)[0].lower()
             if first == "j":
                 edition = "java"
             elif first == "b":
@@ -97,9 +101,9 @@ def _scan(fixed_edition):
             else:
                 return jsonify({
                     "error": ("Invalid parameter: invalid value for "
-                              f"'version': {raw_version!r} "
+                              f"'mc': {raw_mc!r} "
                               "(must start with 'j' or 'b')"),
-                    "missing_or_invalid": missing + ["version"],
+                    "missing_or_invalid": missing + ["mc"],
                 }), 400
 
     try:
@@ -161,7 +165,7 @@ def _scan(fixed_edition):
                     "missing_or_invalid": missing,
                     "results": [],
                 }), 503
-            raw_ptr = fn(*args, None)  # mcLabel -> MC_NEWEST (future version param)
+            raw_ptr = fn(*args, None)  # mcLabel -> MC_NEWEST (future game-version param)
         else:
             raw_ptr = native.lib.seedfinder_scan(*args)
     except Exception as e:

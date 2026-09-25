@@ -25,7 +25,7 @@ def get(path, **params):
 
 def main():
     test_routes_exist()
-    test_first_letter_version()
+    test_first_letter_mc()
     test_path_fixed_wins()
     test_edition_dispatch()
     test_all_17_ids_java()
@@ -45,33 +45,33 @@ def test_routes_exist():
         assert "results" in r.get_json(), path
 
 
-def test_first_letter_version():
+def test_first_letter_mc():
     bed = get("/scan/bedrock", **BASE).get_json()
     jav = get("/scan/java", **BASE).get_json()
 
     # j... -> java (typo tolerated), b... -> bedrock, case-insensitive
     for v in ("java", "jova", "JAVA"):
-        assert get("/scan", **BASE, version=v).get_json() == jav, v
+        assert get("/scan", **BASE, mc=v).get_json() == jav, v
     for v in ("bedrock", "b"):
-        assert get("/scan", **BASE, version=v).get_json() == bed, v
+        assert get("/scan", **BASE, mc=v).get_json() == bed, v
 
     # absent -> bedrock (default)
     assert get("/scan", **BASE).get_json() == bed
 
-    # any other first letter -> 400 with the version flagged
-    r = get("/scan", **BASE, version="x")
+    # any other first letter -> 400 with the mc param flagged
+    r = get("/scan", **BASE, mc="x")
     assert r.status_code == 400, r.status_code
-    assert r.get_json()["missing_or_invalid"] == ["version"], r.get_json()
+    assert r.get_json()["missing_or_invalid"] == ["mc"], r.get_json()
 
 
 def test_path_fixed_wins():
-    # version is silently ignored on fixed paths (spec decision B)
-    a = get("/scan/java", **BASE, version="bedrock").get_json()
+    # mc is silently ignored on fixed paths (spec decision B)
+    a = get("/scan/java", **BASE, mc="bedrock").get_json()
     b = get("/scan/java", **BASE).get_json()
-    assert a == b, "version must be ignored on /scan/java"
-    a = get("/scan/bedrock", **BASE, version="java").get_json()
+    assert a == b, "mc must be ignored on /scan/java"
+    a = get("/scan/bedrock", **BASE, mc="java").get_json()
     b = get("/scan/bedrock", **BASE).get_json()
-    assert a == b, "version must be ignored on /scan/bedrock"
+    assert a == b, "mc must be ignored on /scan/bedrock"
 
 
 def test_edition_dispatch():
@@ -141,28 +141,28 @@ def test_post_get_parity():
 
 
 def test_post_edition_rules():
-    # path wins: version in the body is silently ignored
-    a = client.post("/scan/java", json={**POST_PAYLOAD, "version": "bedrock"})
+    # path wins: mc in the body is silently ignored
+    a = client.post("/scan/java", json={**POST_PAYLOAD, "mc": "bedrock"})
     b = client.post("/scan/java", json=POST_PAYLOAD)
-    assert a.get_json() == b.get_json(), "version must be ignored on POST /scan/java"
+    assert a.get_json() == b.get_json(), "mc must be ignored on POST /scan/java"
 
     # first-letter rule on POST /scan
-    jav = client.post("/scan", json={**POST_PAYLOAD, "version": "jova"})
-    bed = client.post("/scan", json={**POST_PAYLOAD, "version": "bedrock"})
+    jav = client.post("/scan", json={**POST_PAYLOAD, "mc": "jova"})
+    bed = client.post("/scan", json={**POST_PAYLOAD, "mc": "bedrock"})
     ref_j = client.post("/scan/java", json=POST_PAYLOAD)
     ref_b = client.post("/scan/bedrock", json=POST_PAYLOAD)
     assert jav.get_json() == ref_j.get_json()
     assert bed.get_json() == ref_b.get_json()
 
     # bad first letter -> 400
-    r = client.post("/scan", json={**POST_PAYLOAD, "version": "x"})
+    r = client.post("/scan", json={**POST_PAYLOAD, "mc": "x"})
     assert r.status_code == 400
-    assert r.get_json()["missing_or_invalid"] == ["version"]
+    assert r.get_json()["missing_or_invalid"] == ["mc"]
 
-    # non-string version -> 400
-    r = client.post("/scan", json={**POST_PAYLOAD, "version": 123})
+    # non-string mc -> 400
+    r = client.post("/scan", json={**POST_PAYLOAD, "mc": 123})
     assert r.status_code == 400
-    assert r.get_json()["missing_or_invalid"] == ["version"]
+    assert r.get_json()["missing_or_invalid"] == ["mc"]
 
 
 def test_post_malformed_bodies():
