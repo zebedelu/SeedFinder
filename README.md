@@ -276,7 +276,7 @@ Error responses:
 { "error": "Invalid parameter: invalid value for 'seed': 'abc'", "missing_or_invalid": [] }
 
 // 400 - POST body is not a JSON object
-{ "error": "Invalid parameter: POST body must be a JSON object with the same keys as the query string" }
+{ "error": "Invalid parameter: POST body must be a JSON object with the same keys as the query string", "missing_or_invalid": [] }
 
 // 503 - native library failed to load (hosted only, if the build didn't ship the .so)
 { "error": "SeedFinder native library (.so) not loaded on this server.", "results": [] }
@@ -285,7 +285,7 @@ Error responses:
 { "error": "SeedFinder native library has no Java scan support.", "hint": "rebuild the native library — Java scan support missing", "results": [] }
 ```
 
-All deployments run the same app package, so behavior is identical everywhere: `radius` and `max` are clamped to `1000`, and a `missing_or_invalid` array lists any params that had to be defaulted (e.g. a stray `radius=50000` is capped rather than let through).
+All deployments run the same app package, so behavior is identical everywhere: `radius` and `max` are clamped to `1000` (a stray `radius=50000` is silently capped), and `missing_or_invalid` lists the params that were absent or empty and got their default value.
 
 The local server also serves a tiny HTML form at `/` if you'd rather click through a request than type a `curl` command.
 
