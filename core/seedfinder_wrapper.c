@@ -79,14 +79,29 @@ SEEDFINDER_API const char *seedfinder_status(void)
     return "{\"status\": \"ok\"}";
 }
 
-SEEDFINDER_API char *seedfinder_scan(
+#define SCAN_EDITION_BEDROCK 0
+#define SCAN_EDITION_JAVA    1
+
+/* Loop de scan compartilhado pelas duas edicoes. A diferenca sao exatamente
+ * 4 pontos selecionados por `edition`: generator, config, placer e gate de
+ * bioma. mcLabel (so Java): rotulo futuro de versao, ex. "1.18" - NULL,
+ * vazio ou invalido => MC_NEWEST. Hoje o servidor sempre manda NULL. */
+static char *scan_impl(
     uint64_t seed,
     double playerX, double playerZ,
     int radius, int maxResults,
-    const int *types, int numTypes)
+    const int *types, int numTypes,
+    int edition, const char *mcLabel)
 {
+    int mc = MC_NEWEST;
+    if (edition == SCAN_EDITION_JAVA && mcLabel && mcLabel[0]) {
+        int parsed = str2mc(mcLabel);
+        if (parsed != MC_UNDEF)
+            mc = parsed;
+    }
+
     Generator g;
-    setupGenerator(&g, MC_NEWEST, 0);
+    setupGenerator(&g, mc, 0);
     applySeed(&g, DIM_OVERWORLD, seed);
 
     int playerChunkX = (int)floor(playerX / 16.0);
@@ -101,7 +116,10 @@ SEEDFINDER_API char *seedfinder_scan(
         int structType = types[ti];
         StructureConfig sconf;
 
-        if (!getBedrockStructureConfig(structType, MC_NEWEST, &sconf))
+        int hasConfig = (edition == SCAN_EDITION_JAVA)
+            ? getStructureConfig(structType, mc, &sconf)
+            : getBedrockStructureConfig(structType, mc, &sconf);
+        if (!hasConfig)
             continue;
 
         int regionSize = sconf.regionSize;
@@ -113,11 +131,18 @@ SEEDFINDER_API char *seedfinder_scan(
         for (int regX = regionMinX; regX <= regionMaxX; regX++) {
             for (int regZ = regionMinZ; regZ <= regionMaxZ; regZ++) {
                 Pos pos;
-                if (!getBedrockStructurePos(structType, MC_NEWEST, seed, regX, regZ, &pos))
+                int hasPos = (edition == SCAN_EDITION_JAVA)
+                    ? getStructurePos(structType, mc, seed, regX, regZ, &pos)
+                    : getBedrockStructurePos(structType, mc, seed, regX, regZ, &pos);
+                if (!hasPos)
                     continue;
 
-                /* Biome viability check */
-                if (!structureIsViable(structType, &g, pos.x, pos.z))
+                /* Gate de bioma: Java usa o gate nativo do cubiomes;
+                 * Bedrock usa o gate de dois estagios (celula propria). */
+                int viable = (edition == SCAN_EDITION_JAVA)
+                    ? isViableStructurePos(structType, &g, pos.x, pos.z, 0)
+                    : structureIsViable(structType, &g, pos.x, pos.z);
+                if (!viable)
                     continue;
 
                 int dx = pos.x / 16 - playerChunkX;
@@ -130,7 +155,6 @@ SEEDFINDER_API char *seedfinder_scan(
                 const char *name = struct2str(structType);
                 if (!name) name = "unknown";
 
-                /* Grow array if needed */
                 if (resultCount >= resultCapacity) {
                     resultCapacity = resultCapacity == 0 ? 64 : resultCapacity * 2;
                     results = (FoundStructure *)realloc(results, resultCapacity * sizeof(FoundStructure));
@@ -174,6 +198,27 @@ SEEDFINDER_API char *seedfinder_scan(
 
     free(results);
     return json;
+}
+
+SEEDFINDER_API char *seedfinder_scan(
+    uint64_t seed,
+    double playerX, double playerZ,
+    int radius, int maxResults,
+    const int *types, int numTypes)
+{
+    return scan_impl(seed, playerX, playerZ, radius, maxResults,
+                     types, numTypes, SCAN_EDITION_BEDROCK, NULL);
+}
+
+SEEDFINDER_API char *seedfinder_scan_java(
+    uint64_t seed,
+    double playerX, double playerZ,
+    int radius, int maxResults,
+    const int *types, int numTypes,
+    const char *mcLabel)
+{
+    return scan_impl(seed, playerX, playerZ, radius, maxResults,
+                     types, numTypes, SCAN_EDITION_JAVA, mcLabel);
 }
 
 SEEDFINDER_API void seedfinder_free_result(char *result)
