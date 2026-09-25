@@ -325,7 +325,7 @@ _INDEX_HTML = """<!DOCTYPE html>
     <img class="logo" src="data:image/png;base64,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" alt="SeedFinder logo">
     <div>
       <h1>SeedFinder <span>API</span></h1>
-      <div class="subtitle">Minecraft Bedrock structure locator — local API server</div>
+      <div class="subtitle">Minecraft Bedrock &amp; Java structure locator — local API server</div>
     </div>
   </div>
   <a class="gh-link" href="https://github.com/zebedelu/SeedFinder" target="_blank" rel="noopener">github &#8599;</a>
@@ -357,7 +357,9 @@ _INDEX_HTML = """<!DOCTYPE html>
     SeedFinder Scan
   </div>
   <div class="section-desc">
-    Locate structures near a position. Sends a <code>GET /scan</code> request with the parameters below.
+    Locate structures near a position — Bedrock or Java. Sends a <code>GET /scan</code> request with the parameters below.
+    Add <code>"version": "java"</code> to predict <b>Java</b> structures (default <code>bedrock</code>; only the first letter matters — <code>j…</code>/<code>b…</code>, so a typo like <code>jova</code> still works).
+    The same parameters work as a JSON body on <code>POST /scan</code>, and <code>/scan/java</code> / <code>/scan/bedrock</code> pin the edition (they ignore <code>version</code>). Java always targets the latest release.
   </div>
 
   <div class="playground">
@@ -367,7 +369,8 @@ _INDEX_HTML = """<!DOCTYPE html>
   "z": 0,
   "radius": 100,
   "max": 20,
-  "types": [5, 1, 10]
+  "types": "5,1,10",
+  "version": "bedrock"
 }</textarea>
     <div class="actions">
       <button class="primary" id="scan-go">Search</button>
@@ -385,7 +388,29 @@ _INDEX_HTML = """<!DOCTYPE html>
           <button type="button" class="copy-btn" data-copy-target="curl-scan">Copy</button>
         </span>
       </div>
-      <pre id="curl-scan">curl "http://127.0.0.1:7890/scan?seed=8675309&amp;x=0&amp;z=0&amp;radius=100&amp;max=20&amp;types=5,1,10"</pre>
+      <pre id="curl-scan">curl "http://127.0.0.1:7890/scan?seed=8675309&amp;x=0&amp;z=0&amp;radius=100&amp;max=20&amp;types=5,1,10&amp;version=bedrock"</pre>
+    </div>
+    <div class="code-block">
+      <div class="code-head">
+        <span class="label">curl — Java</span>
+        <span class="copy-wrap">
+          <span class="copy-msg" hidden>Copied!</span>
+          <button type="button" class="copy-btn" data-copy-target="curl-scan-java">Copy</button>
+        </span>
+      </div>
+      <pre id="curl-scan-java">curl "http://127.0.0.1:7890/scan/java?seed=8675309&amp;x=0&amp;z=0&amp;radius=100&amp;max=20&amp;types=5,1,10"</pre>
+    </div>
+    <div class="code-block">
+      <div class="code-head">
+        <span class="label">curl — POST + version</span>
+        <span class="copy-wrap">
+          <span class="copy-msg" hidden>Copied!</span>
+          <button type="button" class="copy-btn" data-copy-target="curl-scan-post">Copy</button>
+        </span>
+      </div>
+      <pre id="curl-scan-post">curl -X POST "http://127.0.0.1:7890/scan" \\
+  -H "Content-Type: application/json" \\
+  -d '{"seed": 8675309, "x": 0, "z": 0, "radius": 100, "max": 20, "types": "5,1,10", "version": "java"}'</pre>
     </div>
     <div class="code-block">
       <div class="code-head">
@@ -543,7 +568,7 @@ document.getElementById("crack-clear").addEventListener("click", () => {
 wire("scan-go", "scan-out", async () => {
   const p = JSON.parse(document.getElementById("scan-payload").value);
   const q = new URLSearchParams();
-  for (const k of ["seed", "x", "z", "radius", "max", "types"]) {
+  for (const k of ["seed", "x", "z", "radius", "max", "types", "version"]) {
     if (p[k] !== undefined) q.set(k, p[k]);
   }
   const res = await fetch("/scan?" + q);
