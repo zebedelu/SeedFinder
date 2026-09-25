@@ -34,6 +34,7 @@ def main():
     test_post_get_parity()
     test_post_edition_rules()
     test_post_malformed_bodies()
+    test_golden_java()
     print("scan API GET tests OK")
 
 
@@ -195,6 +196,42 @@ def test_post_malformed_bodies():
     r = client.post("/scan/java", json={"seed": 8675309, "x": 0, "z": 0,
                                         "radius": 50, "max": 5, "types": "5"})
     assert r.status_code == 200, (r.status_code, r.get_json())
+
+
+# Verificado contra o Chunkbase Seed Map (plataforma Java, versao 1.21),
+# seed 8675309, jogador (0,0), radius 100 chunks, em 2026-09-24 por
+# comparacao manual humana: as 16 posicoes casaram com as camadas do
+# Chunkbase (Village + Ocean Monument) dentro de ~10 blocos (offset de
+# ancora do Chunkbase); nenhuma Mansion dentro do radius.
+# Ver tambem Task 4 do plano para o procedimento.
+GOLDEN_JAVA_QUERY = {"seed": "8675309", "x": "0", "z": "0",
+                     "radius": "100", "max": "50", "types": "5,8,9"}
+GOLDEN_JAVA_RESULTS = [
+    {"name": "village", "x": -304, "z": -320, "distance": 27.6},
+    {"name": "village", "x": -272, "z": 352, "distance": 27.8},
+    {"name": "monument", "x": 544, "z": 176, "distance": 35.7},
+    {"name": "village", "x": -192, "z": -704, "distance": 45.6},
+    {"name": "village", "x": -736, "z": 176, "distance": 47.3},
+    {"name": "village", "x": -336, "z": 768, "distance": 52.4},
+    {"name": "village", "x": -880, "z": -352, "distance": 59.2},
+    {"name": "monument", "x": 752, "z": 752, "distance": 66.5},
+    {"name": "village", "x": -224, "z": 1232, "distance": 78.3},
+    {"name": "village", "x": -704, "z": 1120, "distance": 82.7},
+    {"name": "monument", "x": 1296, "z": 272, "distance": 82.8},
+    {"name": "village", "x": -1424, "z": 144, "distance": 89.5},
+    {"name": "village", "x": -1312, "z": 592, "distance": 90.0},
+    {"name": "monument", "x": 1280, "z": 736, "distance": 92.3},
+    {"name": "village", "x": -544, "z": -1424, "distance": 95.3},
+    {"name": "monument", "x": 896, "z": 1280, "distance": 97.7},
+]
+
+
+def test_golden_java():
+    r = get("/scan/java", **GOLDEN_JAVA_QUERY)
+    assert r.status_code == 200, r.status_code
+    assert r.get_json()["results"] == GOLDEN_JAVA_RESULTS, (
+        "saida Java divergiu do golden verificado"
+    )
 
 
 if __name__ == "__main__":
