@@ -20,6 +20,9 @@ _SCAN_ARGTYPES = [
     ctypes.c_int,     # number of types
 ]
 
+# _SCAN_ARGTYPES + o rotulo de versao Java (NULL hoje; futuro mc=1.18 etc.)
+_JAVA_SCAN_ARGTYPES = _SCAN_ARGTYPES + [ctypes.c_char_p]
+
 _CRACK_ARGTYPES = [
     ctypes.POINTER(ctypes.c_int),    # structure type ids
     ctypes.c_int,                    # number of structures
@@ -72,6 +75,11 @@ def _bind(handle) -> None:
     if hasattr(handle, "seedfinder_crack64_shim"):
         handle.seedfinder_crack64_shim.argtypes = _CRACK64_ARGTYPES
         handle.seedfinder_crack64_shim.restype = ctypes.c_void_p
+    # Lib predating Java scan support is valid - bind only when present,
+    # same degrade rule as seedfinder_crack.
+    if hasattr(handle, "seedfinder_scan_java"):
+        handle.seedfinder_scan_java.argtypes = _JAVA_SCAN_ARGTYPES
+        handle.seedfinder_scan_java.restype = ctypes.c_void_p
 
 
 def _candidates() -> list[str]:

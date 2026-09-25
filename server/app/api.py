@@ -1,4 +1,11 @@
-"""API blueprint — /status health check and /scan structure search."""
+"""API blueprint — /status health check and /scan structure search.
+
+Scan routes (GET; POST lands in the next task):
+  /scan          edition from the `version` param (default bedrock,
+                 first-letter rule: j… -> java, b… -> bedrock)
+  /scan/java     Java fixed (path wins; `version` silently ignored)
+  /scan/bedrock  Bedrock fixed
+"""
 
 import ctypes
 import json
@@ -21,23 +28,24 @@ def status():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-@api_bp.route("/scan")
-def scan():
-    """Scan for structures near the given position.
+def _param_source():
+    """Params for the current verb. GET reads the query string only."""
+    return request.args
 
-    Query parameters:
-    seed (int) — World seed
-    x (float) — Player X block position
-    z (float) — Player Z block position
-    radius (int) — Search radius in chunks
-    max (int) — Maximum results to return (default 20)
-    types (string) — Comma-separated structure type IDs (e.g. "5,1,10")
-    """
+
+def _scan(fixed_edition):
+    """Shared scan handler. fixed_edition: None | "java" | "bedrock"."""
     # Parse params with typed defaults when missing or empty.
     missing = []
 
+    try:
+        source = _param_source()
+    except ValueError as e:
+        return jsonify({"error": f"Invalid parameter: {e}",
+                        "missing_or_invalid": missing}), 400
+
     def _arg(name, default, cast):
-        raw = request.args.get(name, "").strip()
+        raw = source.get(name, "").strip()
         if not raw:
             missing.append(name)
             return default
@@ -46,13 +54,34 @@ def scan():
         except ValueError:
             raise ValueError(f"invalid value for {name!r}: {raw!r}")
 
+    # Edition resolution: fixed path wins and ignores `version`; on /scan
+    # the first letter decides (j -> java, b -> bedrock), default bedrock.
+    edition = fixed_edition
+    if edition is None:
+        raw_version = source.get("version", "")
+        if raw_version is None or raw_version == "":
+            edition = "bedrock"
+        else:
+            first = str(raw_version)[0].lower()
+            if first == "j":
+                edition = "java"
+            elif first == "b":
+                edition = "bedrock"
+            else:
+                return jsonify({
+                    "error": ("Invalid parameter: invalid value for "
+                              f"'version': {raw_version!r} "
+                              "(must start with 'j' or 'b')"),
+                    "missing_or_invalid": missing + ["version"],
+                }), 400
+
     try:
         seed = _arg("seed", 0, int) & 0xFFFFFFFFFFFFFFFF
         player_x = _arg("x", 0.0, float)
         player_z = _arg("z", 0.0, float)
         radius = min(_arg("radius", 100, int), 1000)
         max_results = min(_arg("max", 20, int), 1000)
-        types_str = request.args.get("types", "5").strip() or "5"
+        types_str = source.get("types", "5").strip() or "5"
     except ValueError as e:
         return jsonify({"error": f"Invalid parameter: {e}",
                         "missing_or_invalid": missing}), 400
@@ -84,15 +113,35 @@ def scan():
 
     # Call C function — returns void pointer to malloc'd JSON string
     try:
-        raw_ptr = native.lib.seedfinder_scan(
-            ctypes.c_uint64(seed & 0xFFFFFFFFFFFFFFFF),
-            ctypes.c_double(player_x),
-            ctypes.c_double(player_z),
-            ctypes.c_int(radius),
-            ctypes.c_int(max_results),
-            c_types,
-            ctypes.c_int(num_types),
-        )
+        if edition == "java":
+            fn = getattr(native.lib, "seedfinder_scan_java", None)
+            if fn is None:
+                return jsonify({
+                    "error": "SeedFinder native library has no Java scan support.",
+                    "hint": "rebuild the native library — Java scan support missing",
+                    "missing_or_invalid": missing,
+                    "results": [],
+                }), 503
+            raw_ptr = fn(
+                ctypes.c_uint64(seed & 0xFFFFFFFFFFFFFFFF),
+                ctypes.c_double(player_x),
+                ctypes.c_double(player_z),
+                ctypes.c_int(radius),
+                ctypes.c_int(max_results),
+                c_types,
+                ctypes.c_int(num_types),
+                None,  # mcLabel -> MC_NEWEST (future version param)
+            )
+        else:
+            raw_ptr = native.lib.seedfinder_scan(
+                ctypes.c_uint64(seed & 0xFFFFFFFFFFFFFFFF),
+                ctypes.c_double(player_x),
+                ctypes.c_double(player_z),
+                ctypes.c_int(radius),
+                ctypes.c_int(max_results),
+                c_types,
+                ctypes.c_int(num_types),
+            )
     except Exception as e:
         return jsonify({"error": f"Scan failed: {e}",
                         "missing_or_invalid": missing}), 500
@@ -116,3 +165,18 @@ def scan():
         return jsonify({"error": f"Invalid JSON from C: {e}"}), 500
 
     return jsonify(result)
+
+
+@api_bp.route("/scan")
+def scan():
+    return _scan(None)
+
+
+@api_bp.route("/scan/java")
+def scan_java():
+    return _scan("java")
+
+
+@api_bp.route("/scan/bedrock")
+def scan_bedrock():
+    return _scan("bedrock")
