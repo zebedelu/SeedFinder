@@ -4,6 +4,18 @@ echo SeedFinder HTTP Bridge - Build and Start
 echo ============================================
 echo.
 
+rem Remember the user's Python before the MSYS2 PATH prepend below: ucrt64\bin
+rem ships its own python.exe without flask, which would otherwise shadow it and
+rem kill step 2 with "No module named flask".
+set "PYTHON_EXE="
+for /f "delims=" %%P in ('where python 2^>nul') do if not defined PYTHON_EXE set "PYTHON_EXE=%%P"
+if not defined PYTHON_EXE (
+	echo.
+	echo ERROR: python.exe not found on PATH. Install Python 3 and retry.
+	pause
+	exit /b 1
+)
+
 rem Prepend the MSYS2 UCRT64 64-bit toolchain so gcc produces a 64-bit DLL.
 rem (The legacy MinGW.org gcc is 32-bit and its DLL cannot be loaded by a
 rem 64-bit Python - WinError 193.)
@@ -39,10 +51,22 @@ cd ..
 echo.
 echo [2/2] Starting SeedFinder server on port 7890...
 echo.
+echo Python: %PYTHON_EXE%
 echo Keep this window open while using SeedFinder.
 echo The Minecraft mod will connect to http://localhost:7890
 echo.
 echo The API server serves on http://localhost:7890
 echo.
-python server\index.py --lib-path build_server\seedfinder_lib.dll
+"%PYTHON_EXE%" -c "import flask, flask_cors" >nul 2>&1
+if errorlevel 1 (
+	echo.
+	echo ERROR: flask/flask-cors missing from the Python above.
+	echo Install them with:
+	echo.
+	echo   "%PYTHON_EXE%" -m pip install -r server\requirements.txt
+	echo.
+	pause
+	exit /b 1
+)
+"%PYTHON_EXE%" server\index.py --lib-path build_server\seedfinder_lib.dll
 pause
