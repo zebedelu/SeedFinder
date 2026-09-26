@@ -46,7 +46,7 @@ def print_banner(host: str, port: int, lib_path: str, lib_ok: bool) -> None:
     print(f"{_GREEN}{_BANNER}{_RESET}")
     print(f"{_DIM}  {'─' * 58}{_RESET}")
     print(f"{_DIM}  engine{_RESET}  {lib_name}  "
-          f"{'(' + 'cubiomes + Bfinders + SeedCrackerX' + ')' if lib_ok else _YELLOW + 'failed to load!' + _RESET}")
+          f"{'(' + 'cubiomes + Bfinders + SeedCracker' + ')' if lib_ok else _YELLOW + 'failed to load!' + _RESET}")
     print()
     print(f"{_DIM}  api    {_RESET}  {_CYAN}http://{host}:{port}{_RESET}    {_DIM}/status · /scan · /seedcracker{_RESET}")
     print(f"{_DIM}  quit   {_RESET}  Ctrl+C")

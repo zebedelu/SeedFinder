@@ -10,5 +10,7 @@
 
 3. SeedFinder will appear in the module list inside Flarial.
 
-NOTE: The SeedFinder server must be running for this script to work.
-See ../server/start.bat to build and start the server.
+NOTE: With the Server URL setting left empty, the module talks to the hosted
+API at https://mineseedfinder.vercel.app - no local server needed.
+To use a local server instead, start it with server/start.bat (see the README)
+and enter its address (e.g. http://127.0.0.1:7890) in the Server URL field.
