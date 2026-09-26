@@ -20,6 +20,18 @@ from . import native
 
 api_bp = Blueprint("api", __name__)
 
+# Scan responses are deterministic (same params -> same bytes), so the CDN
+# may reuse them: 1h shared cache + stale-while-revalidate serves an expired
+# copy while regenerating in the background. Success paths only — errors
+# stay uncached so the Lua client can detect failures.
+_SCAN_CACHE = "public, s-maxage=3600, stale-while-revalidate=86400"
+
+
+def _ok(payload):
+    resp = jsonify(payload)
+    resp.headers["Cache-Control"] = _SCAN_CACHE
+    return resp
+
 
 @api_bp.route("/status")
 @api_bp.route("/health")
@@ -27,8 +39,14 @@ def status():
     """Health check endpoint."""
     try:
         result = native.lib.seedfinder_status()
-        return jsonify(json.loads(result))
+        resp = jsonify(json.loads(result))
+        # CDN serves this for 60s without invoking the function again; the
+        # Lua client polls every 30s, so ~half the polls hit the edge cache.
+        resp.headers["Cache-Control"] = "public, max-age=60"
+        return resp
     except Exception as e:
+        # No cache header on the error path — the Lua client uses /status
+        # failures to detect that the server is down.
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
@@ -130,7 +148,7 @@ def _scan(fixed_edition):
         }), 400
 
     if not types_list:
-        return jsonify({"results": []})
+        return _ok({"results": []})
 
     # Build ctypes array
     num_types = len(types_list)
@@ -173,7 +191,7 @@ def _scan(fixed_edition):
                         "missing_or_invalid": missing}), 500
 
     if not raw_ptr:
-        return jsonify({"results": [], "missing_or_invalid": missing})
+        return _ok({"results": [], "missing_or_invalid": missing})
 
     # Read the C string from the pointer, then free it
     try:
@@ -190,7 +208,7 @@ def _scan(fixed_edition):
     except json.JSONDecodeError as e:
         return jsonify({"error": f"Invalid JSON from C: {e}"}), 500
 
-    return jsonify(result)
+    return _ok(result)
 
 
 @api_bp.route("/scan", methods=["GET", "POST"])
