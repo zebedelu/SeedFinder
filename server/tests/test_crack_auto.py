@@ -10,12 +10,18 @@ import ctypes
 import json
 import os
 import sys
+import time
 
 DLL = r"build_server\seedfinder_lib.dll"
 FIXTURE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "fixtures_crack64.json")
 LO32_SEED = 5309
 TOLERANCE = 6
+# Tol do pipeline automatico: o guard do lift48 (nS48 > 1024) rejeita os
+# yields maiores (medidos com 4 Trial Chambers + lo32 5309): tol 4 -> 1134,
+# tol 5 -> 2626, tol 6 -> 3391 (todas > guard). tol 2 -> 68 s48 com a seed
+# verdadeira presente. O modo auto usa UM campo de tolerancia (sweep + lift).
+E2E_TOLERANCE = 2
 END = 16_000_000
 
 
@@ -305,6 +311,138 @@ def test_lift63_32bit_seed_via_s48(lib):
           f"matches={hit['matches']}")
 
 
+def test_auto_pipeline_e2e(lib, mt):
+    """Cadeia automatica end-to-end: sweep full-range -> lift48 -> lift63.
+
+    Gated por SEEDFINDER_AUTO_E2E=1 (padrao do SEEDFINDER_FULL_RANGE_TEST);
+    sem a env imprime AUTO_E2E_SKIPPED e retorna. Encadeia os tres exports
+    via ctypes exatamente como o orquestrador do modo auto (regra do Task 4):
+
+    1. sweep do espaco lo32 INTEIRO [0, 2^32) -> lo32 ranqueados por score;
+    2. lift48 de TODOS os lo32 SEM ancoras -> direct32: deteccao barata de
+       mundo 32-bit, discriminada por bioma (~0.2 s / 2000 lo32);
+    3. direto vazio + ancoras -> lift48 APENAS com o lo32 de melhor score
+       (rank1) -> s48 -> lift63 -> seed completa.
+
+    O passo 3 nao recebe os 2000 de proposito: o guard do lift48 (nS48 >
+    1024) estouraria (medido: K=1 -> 68 s48 em tol 2; K=2000 -> 325841 em
+    tol 6) e o lift63 custa ~3.3 s por s48 single-thread, entao o custo do
+    lift limita o que o lift48 pode devolver.
+
+    Tolerancia E2E_TOLERANCE = 2: em tol 4 (default do produto) o mesmo
+    lo32 ja produz 1134 s48 > guard; em tol 6, 3391.
+
+    Custo de referencia medido (i5, 6 threads, 26/09/2026): sweep64 628 s,
+    sweep32 529 s, direct32 (2000 lo32) 0.1 s, lift48 68 s48 <0.1 s, lift63
+    163 s (68 s48 x 32768 hi) -> 1339 s no total. O sweep de 2^32 domina
+    (~9 min/seed) e o lift63 e' 3.3 s por s48 single-thread.
+    """
+    if not os.environ.get("SEEDFINDER_AUTO_E2E"):
+        print("AUTO_E2E_SKIPPED (set SEEDFINDER_AUTO_E2E=1)")
+        return
+    failures = []
+    threads = 6
+
+    # --- fixture 64-bit: sweep full-range + lift 32->48->63 -------------
+    java = load_java_structures()
+    t0 = time.time()
+    sw = sweep(lib, mt, tolerance=E2E_TOLERANCE, start=0, end=1 << 32,
+               max_results=2000, threads=threads)
+    dt64 = time.time() - t0
+    lo64 = [r["seed"] for r in sw.get("results", [])]
+    hit = next((r for r in sw.get("results", []) if r["seed"] == LO32_SEED),
+               None)
+    print(f"  e2e sweep64: {len(lo64)} lo32 em {dt64:.0f}s "
+          f"(checked={sw.get('checked')}, timed_out={sw.get('timed_out')}, "
+          f"score do lo32 verdadeiro {LO32_SEED}: "
+          f"{hit['score'] if hit else 'AUSENTE'})")
+    if "error" in sw:
+        failures.append(f"sweep 64-bit: {sw['error']}")
+    elif hit is None:
+        failures.append(f"lo32 {LO32_SEED} fora do top-2000 do sweep full-range")
+
+    if lo64:
+        # Passo 1 da regra: deteccao 32-bit em TODOS os lo32, sem ancoras.
+        # Barata (~0.2 s / 2000 lo32) e discriminada por bioma; num mundo
+        # 64-bit tem de voltar vazia (Review Focus #3).
+        t0 = time.time()
+        d32all = lift48(lib, mt, lo64, java=None, tolerance=E2E_TOLERANCE)
+        print(f"  e2e direct32 (2000 lo32, sem ancoras): "
+              f"{len(d32all.get('direct32', []))} em {time.time() - t0:.1f}s")
+        if d32all.get("direct32"):
+            failures.append(
+                "mundo 64-bit devolveu candidatos 32-bit falsos: "
+                f"{[x['seed'] for x in d32all['direct32'][:5]]}")
+        # Passo 2: ancoras Java APENAS com o lo32 de melhor score (rank1).
+        # Os 2000 juntos estourariam o guard de 1024 (K=1 ja da 68 em tol 2;
+        # K=2000, 325841 em tol 6) e o lift63 custa 3.3 s por s48.
+        t0 = time.time()
+        d48 = lift48(lib, mt, [lo64[0]], java=java, tolerance=E2E_TOLERANCE)
+        if "error" in d48:
+            failures.append("cadeia 64-bit parou no lift48: " + d48["error"])
+        elif 4294972605 not in d48["s48"]:
+            failures.append(
+                f"lift48 nao liftou 4294972605 "
+                f"({len(d48['s48'])} candidatos s48)")
+        else:
+            print(f"  e2e lift48: s48={len(d48['s48'])} "
+                  f"rank1={lo64[0]} em {time.time() - t0:.1f}s")
+            t0 = time.time()
+            d63 = lift63(lib, d48["s48"], mt, tolerance=E2E_TOLERANCE,
+                         budget=0.0)
+            dt63 = time.time() - t0
+            if "error" in d63:
+                failures.append(f"lift63: {d63['error']}")
+            else:
+                hit63 = next((r for r in d63["results"]
+                              if r.get("seed_str") == "4294972605"), None)
+                print(f"  e2e lift63: {dt63:.0f}s "
+                      f"(nS48={len(d48['s48'])}, checked={d63['checked']}, "
+                      f"timed_out={d63['timed_out']}, "
+                      f"hit={'sim' if hit63 else 'NAO'})")
+                if hit63 is None:
+                    failures.append(
+                        "seed 4294972605 ausente do lift63 "
+                        f"({[r.get('seed_str') for r in d63['results'][:10]]})")
+
+    # --- fixture 32-bit: sweep full-range -> lift48 sem ancoras ---------
+    from test_native_crack import FIXTURE_8675309
+    t0 = time.time()
+    sw32 = sweep(lib, FIXTURE_8675309, tolerance=E2E_TOLERANCE, start=0,
+                 end=1 << 32, max_results=2000, threads=threads)
+    dt32 = time.time() - t0
+    lo32 = [r["seed"] for r in sw32.get("results", [])]
+    hit32 = next((r for r in sw32.get("results", []) if r["seed"] == 8675309),
+                 None)
+    print(f"  e2e sweep32: {len(lo32)} lo32 em {dt32:.0f}s "
+          f"(checked={sw32.get('checked')}, timed_out={sw32.get('timed_out')}, "
+          f"score do lo32 verdadeiro 8675309: "
+          f"{hit32['score'] if hit32 else 'AUSENTE'})")
+    if "error" in sw32:
+        failures.append(f"sweep 32-bit: {sw32['error']}")
+    elif hit32 is None:
+        failures.append("lo32 8675309 fora do top-2000 do sweep full-range")
+
+    if lo32:
+        d48 = lift48(lib, FIXTURE_8675309, lo32, tolerance=E2E_TOLERANCE)
+        if "error" in d48:
+            failures.append(f"cadeia 32-bit parou no lift48: {d48['error']}")
+        else:
+            d32 = next((r for r in d48["direct32"] if r["seed"] == 8675309),
+                       None)
+            print(f"  e2e lift48 (32-bit, sem ancoras): "
+                  f"direct32={len(d48['direct32'])}, s48={len(d48['s48'])}, "
+                  f"hit={'sim' if d32 else 'NAO'}")
+            if d32 is None:
+                failures.append(
+                    "8675309 ausente do direct32 "
+                    f"({[r['seed'] for r in d48['direct32'][:10]]})")
+
+    assert not failures, "\n".join(failures)
+    print(f"  e2e total: sweep64 {dt64:.0f}s + sweep32 {dt32:.0f}s "
+          f"(6 threads)")
+
+
 def main():
     lib = ctypes.CDLL(DLL)
     mt = load_mt_structures()
@@ -320,6 +458,7 @@ def main():
     test_lift63_recovers_full_seed(lib, mt)
     test_lift63_wrong_s48_empty(lib, mt)
     test_lift63_32bit_seed_via_s48(lib)
+    test_auto_pipeline_e2e(lib, mt)
     print("ALL AUTO SWEEP TESTS PASSED")
 
 
