@@ -1,6 +1,7 @@
 # Build output
 build_bridge/
 build_server*/
+build_o0/
 ChunkBiomesGUI/build_test/
 
 # Compiled objects and binaries
