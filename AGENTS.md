@@ -130,9 +130,9 @@ Two assert-based test scripts live in `server/tests/` (no framework, run directl
 
 Third assert-based test: `node wasm/test_wasm.mjs` (Node ≥ 18) — drives `wasm/out/seedfinder.js` via the real ABI (BigInt, HEAP32/HEAPF64, mandatory frees) and recovers fixture seed 8675309; includes a native-DLL parity probe, the scan ground-truth regression (seed 6666 / 8 villages, mirroring `server/tests/test_scan_village_groundtruth.py`), Bedrock+Java scan parity probes, and the crack64 smoke. Requires building the WASM first (`wasm/build_wasm.bat` / `.sh`).
 
-### Stale: `.github/workflows/build-lib.yml`
+### Removed: `.github/workflows/build-lib.yml`
 
-The `build-lib` GitHub Actions workflow (manual trigger) is **out of date**. It copies `build_server/seedfinder_lib.so` to `server/seedfinder_lib.so` ("where Vercel will pick it up") and smoke-tests routes that no longer exist (`/seedfinder`, `/seedfinder/documentation`, `/seedcracker/documentation`, `/robots.txt`, `/sitemap.xml`, `/llms.txt`) plus a bare-GET `/seedcracker` (which now returns 400). Running it would fail. Either delete it or update it to the current route set and stop copying to the Vercel path — the Vercel deployment is an external repository (`mineseedfinder`) that consumes the `.so`, not this repo.
+The workflow was stale (it smoke-tested deleted routes) and has been deleted. Build the `.so` manually on Linux per "Build & run (Linux)" above and commit the artifact.
 
 ## Prerequisites
 
