@@ -53,6 +53,7 @@ add_library(seedfinder_lib SHARED
  ${CMAKE_CURRENT_SOURCE_DIR}/viability.c
  ${CMAKE_CURRENT_SOURCE_DIR}/crack64.c
  ${CMAKE_CURRENT_SOURCE_DIR}/crack_mt.c
+ ${CMAKE_CURRENT_SOURCE_DIR}/crack_auto.c
 )
 target_include_directories(seedfinder_lib PRIVATE
  ${SEEDFINDER_ROOT}

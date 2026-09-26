@@ -230,104 +230,6 @@ SEEDFINDER_API void seedfinder_free_result(char *result)
 
 #include "platform_threads.h"
 
-#define CRACK_SEED_SPACE (0x100000000ULL)
-
-/* Per-input-structure: everything that does NOT depend on the seed.
- * Candidate region cells whose generated structure could land within
- * `tolerance` chunks of the requested anchor chunk (chunk = floor(x/16)).
- * Tipo e metodos (CrackTarget, crackScore, ...) vivem em core/crack_mt.h/.c. */
-
-typedef struct {
-    uint64_t seed;
-    int64_t  score;
-} CrackHit;
-
-typedef struct {
-    const CrackTarget *targets;
-    int                nTargets;
-    uint64_t           start, end;
-    int                maxResults;
-    double             deadline;   /* ms since epoch, 0.0 = unlimited */
-    volatile int      *stop;
-    CrackHit          *hits;       /* thread-local top-N (cap maxResults) */
-    int                hitCount;
-    int64_t            worst;
-    int                worstIdx;
-    uint64_t           checked;
-} CrackWorker;
-
-/* Keep the best maxResults hits. Replacing the current worst keeps the table
- * bounded; the record-minimum process keeps actual replacements few. */
-static void crackInsert(CrackWorker *w, uint64_t seed, int64_t score)
-{
-    if (w->hitCount < w->maxResults) {
-        w->hits[w->hitCount].seed = seed;
-        w->hits[w->hitCount].score = score;
-        w->hitCount++;
-    } else if (score < w->worst) {
-        w->hits[w->worstIdx].seed = seed;
-        w->hits[w->worstIdx].score = score;
-    } else {
-        return;
-    }
-    w->worst = INT64_MAX;
-    w->worstIdx = -1;
-    for (int i = 0; i < w->hitCount; i++) {
-        if (w->hits[i].score < w->worst) {
-            w->worst = w->hits[i].score;
-            w->worstIdx = i;
-        }
-    }
-}
-
-static void *crackWorker(void *arg)
-{
-    CrackWorker *w = (CrackWorker *)arg;
-    uint64_t seed = w->start;
-
-#if CRACK_SIMD
-    if (crack_g_simd) {
-        const uint64_t simdEnd = w->end - ((w->end - w->start) % (uint64_t)CRACK_WIDTH);
-        for (; seed < simdEnd; seed += CRACK_WIDTH) {
-            if (((seed - w->start) & 0xFFFFULL) == 0) {
-                if (*w->stop)
-                    break;
-                if (w->deadline > 0.0 && nowms_s() > w->deadline) {
-                    *w->stop = 1;
-                    break;
-                }
-            }
-            uint64_t batch[CRACK_WIDTH];
-            int64_t scores[CRACK_WIDTH];
-            for (int l = 0; l < CRACK_WIDTH; l++)
-                batch[l] = seed + (uint64_t)l;
-            crackScoreSimd(w->targets, w->nTargets, batch, scores);
-            for (int l = 0; l < CRACK_WIDTH; l++) {
-                w->checked++;
-                if (scores[l] >= 0)
-                    crackInsert(w, batch[l], scores[l]);
-            }
-        }
-    }
-#endif
-    /* Scalar path: seed-range remainder, non-AVX2 CPUs, and bail after stop. */
-    for (; seed < w->end && !*w->stop; seed++) {
-        if ((seed & 0xFFFFULL) == 0) {
-            if (*w->stop)
-                break;
-            if (w->deadline > 0.0 && nowms_s() > w->deadline) {
-                *w->stop = 1;
-                break;
-            }
-        }
-        int64_t score = crackScore(w->targets, w->nTargets, seed);
-        if (score >= 0)
-            crackInsert(w, seed, score);
-        w->checked++;
-    }
-    return NULL;
-}
-
 SEEDFINDER_API char *seedfinder_crack(
     const int *types, int numTypes,
     const double *xBlocks, const double *zBlocks,
@@ -335,12 +237,12 @@ SEEDFINDER_API char *seedfinder_crack(
     uint64_t startSeed, uint64_t endSeed,
     int maxResults, double timeBudgetSec, int numThreads)
 {
-    if (numTypes < 4)
-        return strdup("{\"error\":\"at least 4 structures are required\"}");
-    if (numTypes > CRACK_MAX_STRUCTURES)
-        return strdup("{\"error\":\"too many structures (max 24)\"}");
-    if (tolerance < 0 || tolerance > 8)
-        return strdup("{\"error\":\"tolerance must be between 0 and 8 chunks\"}");
+    CrackTarget targets[CRACK_MAX_STRUCTURES];
+    int n = 0;
+    char *err = NULL;
+    if (crackTargetsBuild(types, numTypes, xBlocks, zBlocks, tolerance,
+                          targets, &n, &err))
+        return err;
     if (maxResults <= 0 || maxResults > 2000)
         return strdup("{\"error\":\"maxResults must be between 1 and 2000\"}");
     if (numThreads < 1 || numThreads > 64)
@@ -350,60 +252,12 @@ SEEDFINDER_API char *seedfinder_crack(
     if (startSeed >= endSeed)
         return strdup("{\"error\":\"empty seed range\"}");
 
-#if CRACK_SIMD
-    crackSimdDetect();
-#endif
-
-    CrackTarget targets[CRACK_MAX_STRUCTURES];
-    int maxD2 = tolerance * tolerance;
-
-    for (int i = 0; i < numTypes; i++) {
-        StructureConfig sconf;
-        if (!getBedrockStructureConfig(types[i], MC_NEWEST, &sconf))
-            return strdup("{\"error\":\"unknown structure type\"}");
-        if (types[i] == Mineshaft)
-            return strdup("{\"error\":\"Mineshaft is not supported by SeedCracker\"}");
-
-        CrackTarget *t = &targets[i];
-        int64_t chunkX = (xBlocks[i] >= 0) ? (int64_t)xBlocks[i] / 16
-                                           : ((int64_t)xBlocks[i] - 15) / 16;
-        int64_t chunkZ = (zBlocks[i] >= 0) ? (int64_t)zBlocks[i] / 16
-                                           : ((int64_t)zBlocks[i] - 15) / 16;
-        if (chunkX < -100000000LL || chunkX > 100000000LL ||
-            chunkZ < -100000000LL || chunkZ > 100000000LL)
-            return strdup("{\"error\":\"coordinates out of range\"}");
-
-        t->type = types[i];
-        t->chunkX = chunkX;
-        t->chunkZ = chunkZ;
-        t->maxD2 = maxD2;
-
-        int64_t rLoX = (chunkX - tolerance - (sconf.regionSize - 1)) / sconf.regionSize;
-        int64_t rHiX = (chunkX + tolerance >= 0) ? (chunkX + tolerance) / sconf.regionSize
-                                                 : (chunkX + tolerance - (sconf.regionSize - 1)) / sconf.regionSize;
-        int64_t rLoZ = (chunkZ - tolerance - (sconf.regionSize - 1)) / sconf.regionSize;
-        int64_t rHiZ = (chunkZ + tolerance >= 0) ? (chunkZ + tolerance) / sconf.regionSize
-                                                 : (chunkZ + tolerance - (sconf.regionSize - 1)) / sconf.regionSize;
-
-        int n = 0;
-        for (int64_t rx = rLoX; rx <= rHiX && n < CRACK_MAX_REGIONS; rx++) {
-            for (int64_t rz = rLoZ; rz <= rHiZ && n < CRACK_MAX_REGIONS; rz++) {
-                t->regX[n] = (int)rx;
-                t->regZ[n] = (int)rz;
-                n++;
-            }
-        }
-        t->numRegions = n;
-        if (n == 0)
-            return strdup("{\"error\":\"invalid coordinates\"}");
-    }
-
     /* Keep an input-ordered copy for serializing matches back to the caller. */
     CrackTarget orig[CRACK_MAX_STRUCTURES];
-    memcpy(orig, targets, (size_t)numTypes * sizeof(CrackTarget));
+    memcpy(orig, targets, (size_t)n * sizeof(CrackTarget));
 
     /* Strongest filter first. */
-    qsort(targets, numTypes, sizeof(CrackTarget), crackTargetCompare);
+    qsort(targets, n, sizeof(CrackTarget), crackTargetCompare);
 
 #if defined(__EMSCRIPTEN__)
     /* Sem -pthread o pthread_create aborta em runtime; o JS paraleliza
@@ -413,98 +267,25 @@ SEEDFINDER_API char *seedfinder_crack(
     if ((endSeed - startSeed) < (uint64_t)numThreads)
         numThreads = 1;
 
-    uint64_t range = endSeed - startSeed;
-    uint64_t part = range / (uint64_t)numThreads;
-
-    CrackThread *pids = calloc((size_t)numThreads, sizeof(CrackThread));
-    CrackWorker *workers = calloc((size_t)numThreads, sizeof(CrackWorker));
-    CrackHit *hits = calloc((size_t)numThreads * maxResults, sizeof(CrackHit));
-    volatile int stop = 0;
     double deadline = (timeBudgetSec > 0.0) ? nowms_s() + timeBudgetSec * 1000.0 : 0.0;
-
-    for (int i = 0; i < numThreads; i++) {
-        CrackWorker *w = &workers[i];
-        w->targets = targets;
-        w->nTargets = numTypes;
-        w->start = startSeed + i * part;
-        w->end = (i == numThreads - 1) ? endSeed : startSeed + (i + 1) * part;
-        w->maxResults = maxResults;
-        w->deadline = deadline;
-        w->stop = &stop;
-        w->hits = hits + (size_t)i * maxResults;
-        w->hitCount = 0;
-        w->worst = INT64_MAX;
-        w->worstIdx = -1;
-        w->checked = 0;
-        if (numThreads == 1)
-            crackWorker(w); /* inline: mesma partição, mesmo deadline, mesmo stop */
-        else
-            pids[i] = crackThreadCreate(crackWorker, w);
-    }
-    if (numThreads > 1)
-        for (int i = 0; i < numThreads; i++)
-            crackThreadJoin(pids[i]);
-
-    int total = 0;
-    for (int i = 0; i < numThreads; i++)
-        total += workers[i].hitCount;
-
-    CrackHit *all = malloc(((size_t)total > 0 ? (size_t)total : 1) * sizeof(CrackHit));
+    CrackHit *all = NULL;
     int c = 0;
-    for (int i = 0; i < numThreads; i++)
-        for (int j = 0; j < workers[i].hitCount; j++)
-            all[c++] = workers[i].hits[j];
-
-    /* Insertion sort ascending by score (c is small). */
-    for (int i = 1; i < c; i++) {
-        CrackHit key = all[i];
-        int j = i - 1;
-        while (j >= 0 && all[j].score > key.score) { all[j + 1] = all[j]; j--; }
-        all[j + 1] = key;
-    }
-    if (c > maxResults)
-        c = maxResults;
-
     uint64_t checked = 0;
-    for (int i = 0; i < numThreads; i++)
-        checked += workers[i].checked;
+    int timedOut = 0;
+    if (crackSweepRanked(targets, n, startSeed, endSeed, maxResults, deadline,
+                         numThreads, &all, &c, &checked, &timedOut) != 0)
+        return strdup("{\"error\":\"out of memory\"}");
 
     /* Serialize: recompute per-structure match chunk for each winner. Only
      * seeds whose matches are biome-viable are kept — a match the RNG would
      * place but the game never generates (wrong biome) is a false positive
      * (e.g. seed 254568). Score is recomputed from the viable matches. */
-    Generator g;
-    setupGenerator(&g, MC_NEWEST, 0);
-
-    int *m = malloc(((size_t)c > 0 ? (size_t)c : 1) * (size_t)numTypes * 2 * sizeof(int));
+    int *m = malloc(((size_t)c > 0 ? (size_t)c : 1) * (size_t)n * 2 * sizeof(int));
     int kept = 0;
     for (int i = 0; i < c; i++) {
-        applySeed(&g, DIM_OVERWORLD, all[i].seed);
         int64_t viableScore = 0;
-        int valid = 1;
-        int *mm = m + (size_t)kept * (size_t)numTypes * 2;
-        for (int k = 0; k < numTypes && valid; k++) {
-            const CrackTarget *t = &orig[k];
-            int bx = 0, bz = 0, bd = INT32_MAX;
-            for (int r = 0; r < t->numRegions; r++) {
-                Pos pos;
-                if (!getBedrockStructurePos(t->type, MC_NEWEST, all[i].seed,
-                                            t->regX[r], t->regZ[r], &pos))
-                    continue;
-                if (!structureIsViable(t->type, &g, pos.x, pos.z))
-                    continue;
-                int cx = (pos.x - 8) >> 4;
-                int cz = (pos.z - 8) >> 4;
-                int dx = cx - (int)t->chunkX;
-                int dz = cz - (int)t->chunkZ;
-                int d2 = dx * dx + dz * dz;
-                if (d2 < bd) { bd = d2; bx = cx; bz = cz; }
-            }
-            if (bd == INT32_MAX || bd > t->maxD2) { valid = 0; break; }
-            mm[k * 2] = bx; mm[k * 2 + 1] = bz;
-            viableScore += bd;
-        }
-        if (!valid)
+        int *mm = m + (size_t)kept * (size_t)n * 2;
+        if (!crackValidateSeed(orig, n, all[i].seed, mm, &viableScore))
             continue;
         all[kept].seed = all[i].seed;
         all[kept].score = viableScore;
@@ -516,29 +297,29 @@ SEEDFINDER_API char *seedfinder_crack(
     for (int i = 1; i < c; i++) {
         CrackHit key = all[i];
         int kmrow[CRACK_MAX_STRUCTURES * 2];
-        const int *src = m + (size_t)i * (size_t)numTypes * 2;
-        for (int k = 0; k < numTypes * 2; k++) kmrow[k] = src[k];
+        const int *src = m + (size_t)i * (size_t)n * 2;
+        for (int k = 0; k < n * 2; k++) kmrow[k] = src[k];
         int j = i - 1;
         while (j >= 0 && all[j].score > key.score) {
             all[j + 1] = all[j];
-            for (int k = 0; k < numTypes * 2; k++)
-                m[(size_t)(j + 1) * numTypes * 2 + k] = m[(size_t)j * numTypes * 2 + k];
+            for (int k = 0; k < n * 2; k++)
+                m[(size_t)(j + 1) * n * 2 + k] = m[(size_t)j * n * 2 + k];
             j--;
         }
         all[j + 1] = key;
-        for (int k = 0; k < numTypes * 2; k++)
-            m[(size_t)(j + 1) * numTypes * 2 + k] = kmrow[k];
+        for (int k = 0; k < n * 2; k++)
+            m[(size_t)(j + 1) * n * 2 + k] = kmrow[k];
     }
 
-    size_t cap = 64 + (size_t)c * ((size_t)numTypes * 32 + 80) + 64;
+    size_t cap = 64 + (size_t)c * ((size_t)n * 32 + 80) + 64;
     char *buf = malloc(cap);
     int off = sprintf(buf, "{\"results\":[");
     for (int i = 0; i < c; i++) {
         off += sprintf(buf + off, "%s{\"seed\":%llu,\"score\":%lld,\"matches\":[",
                        i ? "," : "", (unsigned long long)all[i].seed,
                        (long long)all[i].score);
-        const int *mm = m + (size_t)i * (size_t)numTypes * 2;
-        for (int k = 0; k < numTypes; k++) {
+        const int *mm = m + (size_t)i * (size_t)n * 2;
+        for (int k = 0; k < n; k++) {
             off += sprintf(buf + off, "%s[%d,%d]", k ? "," : "",
                            mm[k * 2], mm[k * 2 + 1]);
         }
@@ -547,10 +328,10 @@ SEEDFINDER_API char *seedfinder_crack(
     off += sprintf(buf + off,
                    "],\"checked\":%llu,\"timed_out\":%s,\"threads\":%d}",
                    (unsigned long long)checked,
-                   stop ? "true" : "false", numThreads);
+                   timedOut ? "true" : "false", numThreads);
 
     free(m);
-    free(pids); free(workers); free(hits); free(all);
+    free(all);
     return buf;
 }
 
