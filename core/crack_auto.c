@@ -176,6 +176,15 @@ char *seedfinder_crack_auto_lift48(
     return buf;
 }
 
+/* Célula de placement in-tolerance de uma âncora (estágio 3 do lift63). */
+typedef struct { int d2, x, z; } AutoCand;
+
+static int autoCandCmp(const void *a, const void *b)
+{
+    const AutoCand *x = (const AutoCand *)a, *y = (const AutoCand *)b;
+    return (x->d2 > y->d2) - (x->d2 < y->d2);
+}
+
 char *seedfinder_crack_auto_lift63(
     const uint64_t *s48Seeds, int nS48,
     const int *mtTypes, const double *mtX, const double *mtZ, int nMt,
@@ -206,7 +215,6 @@ char *seedfinder_crack_auto_lift63(
     memcpy(ord, targets, (size_t)n * sizeof(CrackTarget));
     qsort(ord, n, sizeof(CrackTarget), crackTargetCompare);
 
-    typedef struct { int d2, x, z; } AutoCand;
     AutoCand *cands = malloc((size_t)n * CRACK_MAX_REGIONS * sizeof(AutoCand));
     int *nCand = malloc((size_t)n * sizeof(int));
     int *cOff = malloc((size_t)n * sizeof(int));
@@ -259,6 +267,8 @@ char *seedfinder_crack_auto_lift63(
             }
             if (cnt == 0) { ok = 0; break; }   /* âncora sem placement in-range */
             nCand[k] = cnt;
+            /* Asc por d²: o primeiro viável já é o de menor distância. */
+            qsort(&cands[base], (size_t)cnt, sizeof(AutoCand), autoCandCmp);
             base += cnt;
         }
         if (!ok) continue;
@@ -277,12 +287,14 @@ char *seedfinder_crack_auto_lift63(
             int viable = 1;
             for (int k = 0; k < n && viable; k++) {
                 int bestD = INT32_MAX;
+                /* Células em ordem asc de d² (pré-ordenadas acima): o primeiro
+                 * viável já é o de menor d², então dá pra sair na hora. */
                 for (int c = 0; c < nCand[k]; c++) {
                     const AutoCand *cd = &cands[cOff[k] + c];
-                    if (cd->d2 > bestD) continue;  /* já temos um mais próximo */
-                    if (!structureIsViable(ord[k].type, &g, cd->x, cd->z))
-                        continue;
-                    bestD = cd->d2;
+                    if (structureIsViable(ord[k].type, &g, cd->x, cd->z)) {
+                        bestD = cd->d2;
+                        break;
+                    }
                 }
                 if (bestD == INT32_MAX) { viable = 0; break; }
                 score += bestD;
