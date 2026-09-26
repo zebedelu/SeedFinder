@@ -60,11 +60,15 @@ def sweep(lib, structures, tolerance=TOLERANCE, start=0, end=END,
 def test_sweep_finds_lo32_without_biome_gate(lib, mt):
     data = sweep(lib, mt, tolerance=TOLERANCE, start=0, end=END, max_results=2000)
     assert "error" not in data, data
+    assert "checked" in data and "timed_out" in data, sorted(data)
     hit = next((r for r in data["results"] if r["seed"] == LO32_SEED), None)
     assert hit is not None, (
         f"seed {LO32_SEED} missing from top results "
         f"({[r['seed'] for r in data['results'][:20]]}, "
         f"checked={data['checked']}, timed_out={data['timed_out']})")
+    # Contrato placement-only (defeito 2): o auto JSON nunca carrega matches
+    # nem passa pelo gate de bioma.
+    assert "matches" not in hit, f"auto sweep must stay placement-only: {hit}"
     assert hit["score"] <= 36, f"score {hit['score']} > tolerance^2"
     print(f"  lo32 {LO32_SEED} score={hit['score']} "
           f"checked={data['checked']} threads={data['threads']}")

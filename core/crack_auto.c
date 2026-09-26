@@ -58,6 +58,10 @@ char *seedfinder_crack_auto_sweep(
 
     size_t cap = 64 + (size_t)nHits * 80 + 64;
     char *buf = malloc(cap);
+    if (!buf) {
+        free(hits);
+        return strdup("{\"error\":\"out of memory\"}");
+    }
     int off = sprintf(buf, "{\"results\":[");
     for (int i = 0; i < nHits; i++)
         off += sprintf(buf + off, "%s{\"seed\":%llu,\"score\":%lld}",
