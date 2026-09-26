@@ -28,7 +28,7 @@ You can call the hosted API directly from any language, or drop the Lua module i
 - [Live example](#live-example)
 - [Two ways to use SeedFinder](#two-ways-to-use-seedfinder)
 - [How it works](#how-it-works)
-- [SeedCrackerX (reverse seed search)](#seedcrackerx-reverse-seed-search)
+- [SeedCracker (Bedrock seed search by structure layout)](#seedcracker-bedrock-seed-search-by-structure-layout)
 - [API reference](#api-reference)
 - [Supported structures](#supported-structures)
 - [Building from source](#building-from-source)
@@ -61,7 +61,7 @@ Target platform is Minecraft Bedrock Edition (1.18 through the latest release) a
 - **In-game overlay for Flarial Client**, results sorted by distance, rendered with ImGui.
 - **17 working structure types** - villages, temples, ocean structures, ancient cities, mansions, portals, and more. Full list [below](#supported-structures).
 - **Multi-type queries** - ask for several structures in one request (`types=5,8,9`) instead of one call per type.
-- **SeedCrackerX (reverse seed search)** - give at least 4 structures with coordinates and get the most probable Bedrock seed back. Sweeps the 32-bit seed space in parallel in native C inside a time budget. Runs on the local API - see [SeedCrackerX](#seedcrackerx-reverse-seed-search).
+- **SeedCracker (Bedrock seed search by structure layout)** - describe the structures you want and where, and get the Bedrock seeds that generate them there. Sweeps the 32-bit seed space in parallel in native C inside a time budget. Runs on the local API - see [SeedCracker](#seedcracker-bedrock-seed-search-by-structure-layout).
 - **No dependencies for players.** The packaged `.exe` bundles the server itself; no Python or pip needed on the player's machine.
 - Apache-2.0, source available, and nothing in the code sends data anywhere except the request you made.
 
@@ -154,9 +154,9 @@ Flarial Lua Script  --HTTP-->  Flask server  --ctypes-->  seedfinder_lib (.so / 
 
 There's also an experimental fourth path in `core/SeedFinderBridge.cpp` / `.h`: a direct Lua↔C bridge meant to be compiled straight into the Flarial Client DLL, cutting out the HTTP hop entirely. It's set up in `CMakeLists.txt` but the shipped Lua script doesn't use it yet - see [Roadmap](#roadmap).
 
-## SeedCrackerX (reverse seed search)
+## SeedCracker (Bedrock seed search by structure layout)
 
-SeedFinder walks seed → structures. [SeedCrackerX](https://mineseedfinder.vercel.app/seedcracker) goes the other way: give it at least 4 structures with their coordinates and it returns the most probable Bedrock world seeds that generate them.
+SeedFinder walks seed → structures. [SeedCracker](https://mineseedfinder.vercel.app/seedcracker) goes the other way: you describe the layout you want - which structures at which coordinates - and it returns the Bedrock seeds that generate them.
 
 It sweeps the 32-bit Bedrock seed space in parallel inside the native library (one thread per CPU core, capped at 64), bounded by a time budget — so an answer always comes back, even if the full sweep would take minutes. The more structures you list and the tighter the `tolerance`, the fewer seeds pass.
 
@@ -175,15 +175,15 @@ curl -X POST http://127.0.0.1:7890/seedcracker \
 
 The response is always a JSON list: a header item with `status` (`ok`, `partial` when the time budget ran out, `error`, or `unavailable`), then one item per probable seed with `seed`, `score` (sum of squared chunk deviations across structures — lower is better) and the matched structure chunk coordinates.
 
-SeedCracker runs on the **local API only** (`http://127.0.0.1:7890`, started with `server\start.bat` or `server/start.sh`). The hosted instance disables the route because the computation is too expensive to keep running for free; it answers with an `"unavailable"` list and a download link. Payload options: `tolerance` (0–8 chunks, default 6), `units` (`blocks` or `chunks`), `start`/`end` (seed range), `max` (default 500, cap 2000), `max_seconds` (default 30, 1–120). Full docs: [SeedCrackerX documentation](https://mineseedfinder.vercel.app/seedcracker/documentation).
+SeedCracker runs on the **local API only** (`http://127.0.0.1:7890`, started with `server\start.bat` or `server/start.sh`). The hosted instance disables the route because the computation is too expensive to keep running for free; it answers with an `"unavailable"` list and a download link. Payload options: `tolerance` (0–8 chunks, default 6), `units` (`blocks` or `chunks`), `start`/`end` (seed range), `max` (default 500, cap 2000), `max_seconds` (default 30, 1–120). Full docs: [SeedCracker documentation](https://mineseedfinder.vercel.app/seedcracker/documentation).
 
-### SeedCrackerX 64-bit mode
+### SeedCracker 64-bit mode
 
-Modern Bedrock worlds use 64-bit world seeds, but the classic cracker above only searches the low 32 bits (the Mersenne-Twister structures). The 64-bit mode cracks the **full seed** (`0 ≤ seed < 2^63`, as the game stores it internally) by also exploiting Trail Ruins and Trial Chambers, whose placement RNG is Java-style and keyed on the whole 48-bit seed. It runs on the local API (`POST /seedcracker` JSON only) and in the browser WASM build (export `_seedfinder_crack64_shim`, smoke-tested green — rebuild via `wasm/build_wasm.bat`/`.sh`, verify with `node wasm/test_wasm.mjs`).
+Modern Bedrock worlds use 64-bit world seeds, but the classic cracker above only searches the low 32 bits (the Mersenne-Twister structures). The 64-bit mode searches the **full 64-bit seed space** (`0 ≤ seed < 2^63`, as the game stores it internally) by also exploiting Trail Ruins and Trial Chambers, whose placement RNG is Java-style and keyed on the whole 48-bit seed. It runs on the local API (`POST /seedcracker` JSON only) and in the browser WASM build (export `_seedfinder_crack64_shim`, smoke-tested green — rebuild via `wasm/build_wasm.bat`/`.sh`, verify with `node wasm/test_wasm.mjs`).
 
 **Requirements:** at least **one** Java-style anchor — Trail Ruins (`type` 23) or Trial Chambers (`type` 24) — passed under a separate **`java_structures`** key (sending them in `structures` is a 400); plus **1–24** regular MT structures under `mt_structures` (types 1–11, 13, 14, minus Mineshaft, which is never crackable). In practice, 4+ Java anchors are recommended: they are what shrink the 48-bit residual space, and 1–2 anchors can leave thousands of survivors for the cross-check. For an **unbounded** request (`span ≥ 2^32`) they must also be **exact** (tolerance 0) — see *Full-range requires near-exact Java anchors* below.
 
-**When to use it:** any world created after the 1.16.100-ish generation update, where the seed shown by tools like Chunkbase exceeds `2^32`. If you don't know the seed size, crack in 32-bit first — a `partial`/no-answer there is your hint to switch.
+**When to use it:** any world created after the 1.16.100-ish generation update, where the seed shown by tools like Chunkbase exceeds `2^32`. If you don't know which space your target layout lives in, run the 32-bit search first - a `partial` or empty answer there is your hint to switch.
 
 **Window semantics (`start`/`end`):** the range spans the 63-bit seed space and selects one of two engines:
 
@@ -196,7 +196,7 @@ Modern Bedrock worlds use 64-bit world seeds, but the classic cracker above only
 |---|---|
 | Measured (local API): 4 Trial Chambers + 2 MT structures, window seed ± 2^24 (span 2^25) | **~1.0–1.4 s**, 6 threads, a **unique** candidate — exactly the real seed 4294972605 (Chunkbase data; full dataset in `docs/verification/bedrock64-empirical.md`) |
 | 8 MT + 4 Java anchors, `tolerance: 6`, no window | instant `error` from the full-range guard ("… pass a start/end window … or exact Trial Chambers/Trail Ruins coordinates") — the fixture's approximate coordinates would otherwise need years |
-| Exact anchors (`tolerance: 0`), no window | stage A ~5–7 min + seconds of lifting → recovers the full seed (`FULL_RANGE_OK` in `core/test_crack64.c`, opt-in via `SEEDFINDER_FULL_RANGE_TEST=1`) |
+| Exact anchors (`tolerance: 0`), no window | stage A ~5–7 min + seconds of lifting → finds the full seed (`FULL_RANGE_OK` in `core/test_crack64.c`, opt-in via `SEEDFINDER_FULL_RANGE_TEST=1`) |
 
 **`seed` vs `seed_str`:** each candidate carries both. `seed` is a JSON number and **loses precision** for anything above 2^53 in JavaScript and most parsers; `seed_str` is the exact decimal string — use it as the identity of the candidate. The response envelope/header also gains `"bits": 64`, and matched structures are reported in **blocks** over the raw C/WASM ABI (the HTTP route converts them to chunks, same convention as 32-bit). In 64-bit mode `checked` counts the **swept 48-bit residual candidates** (bounded path) or the **lo32 sweep plus Java-lift probes** (full-range), not lifted 64-bit seeds — for a non-wrapping window with span < 2^48 it equals that span exactly (2^25 = 33,554,432 in the example below). The 64-bit `max_seconds` cap is **2400** (the 32-bit cap stays 120); a bounded request never needs more than a few seconds.
 
@@ -285,13 +285,13 @@ Error responses:
 { "error": "SeedFinder native library has no Java scan support.", "hint": "rebuild the native library — Java scan support missing", "results": [] }
 ```
 
-All deployments run the same app package, so behavior is identical everywhere: `radius` and `max` are clamped to `1000` (a stray `radius=50000` is silently capped), and `missing_or_invalid` lists the params that were absent or empty and got their default value.
+All deployments run the same app package, so behavior is identical everywhere: `radius` and `max` are clamped to `1000` (a stray `radius=50000` is silently capped), and a `missing_or_invalid` array in error responses lists the params that were absent or empty and got their default value.
 
 The local server also serves a tiny HTML form at `/` if you'd rather click through a request than type a `curl` command.
 
 ### `POST /seedcracker`
 
-Every SeedFinder deployment can also crack a seed back from structures. Parameters:
+The local API also exposes the SeedCracker structure-layout search (Bedrock). Parameters:
 
 | Param | Type | Default | Notes |
 |---|---|---|---|
@@ -302,7 +302,7 @@ Every SeedFinder deployment can also crack a seed back from structures. Paramete
 | `max` | int | `500` | Max results kept (best by score). |
 | `max_seconds` | float | `30` | Time budget; partial results when it expires. |
 
-Response is a JSON list — header then `{"seed", "score", "matches"}` per candidate. Only the local API serves it; the hosted site returns `"unavailable"`. See [SeedCrackerX (reverse seed search)](#seedcrackerx-reverse-seed-search) and [SeedCrackerX documentation](https://mineseedfinder.vercel.app/seedcracker/documentation).
+Response is a JSON list — header then `{"seed", "score", "matches"}` per candidate. Only the local API serves it; the hosted site returns `"unavailable"`. See [SeedCracker (Bedrock seed search by structure layout)](#seedcracker-bedrock-seed-search-by-structure-layout) and [SeedCracker documentation](https://mineseedfinder.vercel.app/seedcracker/documentation).
 
 ## Supported structures
 
@@ -395,12 +395,12 @@ Compared to a Lua- or Python-only structure finder: the search itself runs in co
 
 Compared to needing your own backend: the hosted API is free and public, so a small tool or bot can integrate without anyone standing up infrastructure for it.
 
-And the honest tradeoff: this is a Flarial-specific project with a Windows-first packaged path and a web API. If you want a native desktop GUI rather than an HTTP API, [ChunkBiomesGUI](https://github.com/Nel-S/ChunkBiomes) or [cubiomes](https://github.com/Cubitect/cubiomes) directly might suit you better - SeedFinder is really this project's packaging of that same engine for Flarial users and API consumers.
+And the honest tradeoff: this is a Flarial-first project with a Windows-first packaged path and a web API. If you want a native desktop GUI rather than an HTTP API or an in-game overlay, [ChunkBiomesGUI](https://github.com/Nel-S/ChunkBiomes) or [cubiomes](https://github.com/Cubitect/cubiomes) directly might suit you better - SeedFinder is really this project's packaging of that same engine for Flarial users and API consumers.
 
 ## Roadmap
 
 - **Direct Lua↔C bridge** (`core/SeedFinderBridge.cpp`) - compile the engine straight into the Flarial Client DLL and expose `seedfinder_bridge.scanStructures(...)` to Lua, removing the HTTP hop for the in-game path.
-- **SeedCrackerX polish** - the reverse seed search ([section above](#seedcrackerx-reverse-seed-search)) works and is documented; future work: hosted availability, more structure types, and a tighter scoring model.
+- **SeedCracker polish** - the structure-layout seed search ([section above](#seedcracker-bedrock-seed-search-by-structure-layout)) works and is documented; future work: more structure types and a tighter scoring model.
 - **Amethyst Geode and Desert Well support** - IDs `17` and `16` are per-chunk placement features (not region structures) and are not available. Geode prediction would additionally require simulating cave air volume, which the engine doesn't model.
 - **Nether/End structures** - Bastion, Fortress, and End City configs already exist internally but aren't wired into the public `types` list yet.
 
