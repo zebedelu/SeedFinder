@@ -1,0 +1,55 @@
+name: build-lib
+
+# Manual only: click "Run workflow" in the Actions tab. The .so never
+# rebuilds on a plain push; the button is the deliberate trigger.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-lib:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build seedfinder_lib.so
+        run: |
+          cmake -S core -B build_server
+          cmake --build build_server -j$(nproc)
+
+      - name: Smoke test (load lib + status + scan)
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -q -r server/requirements.txt
+          .venv/bin/python - <<'PY'
+          import sys
+          sys.path.insert(0, ".")
+          from server.app import create_app, native
+
+          app = create_app()
+          # bootstrap_lib() looks in server/build_server/; CI builds into the
+          # repo-root build_server/ (same as start.bat), so load it explicitly.
+          native.load_lib("build_server/seedfinder_lib.so")
+          assert native.lib is not None, "native lib not loaded"
+          for sym in ("seedfinder_crack", "seedfinder_crack64_shim",
+                      "seedfinder_scan_java"):
+              assert hasattr(native.lib, sym), f"missing symbol: {sym}"
+          c = app.test_client()
+          r = c.get("/status")
+          assert r.status_code == 200, f"/status -> {r.status_code}"
+          r = c.get("/scan?seed=6666&x=0&z=0&radius=100&max=50&types=5")
+          assert r.status_code == 200, f"/scan -> {r.status_code}"
+          assert r.get_json()["results"], "/scan returned no results"
+          r = c.get("/scan/java?seed=1&x=0&z=0&radius=50&max=10&types=5")
+          assert r.status_code == 200, f"/scan/java -> {r.status_code}"
+          print("SMOKE OK")
+          PY
+
+      - name: Upload seedfinder_lib.so artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: seedfinder-lib
+          path: build_server/seedfinder_lib.so
+          if-no-files-found: error

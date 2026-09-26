@@ -130,9 +130,9 @@ Two assert-based test scripts live in `server/tests/` (no framework, run directl
 
 Third assert-based test: `node wasm/test_wasm.mjs` (Node ≥ 18) — drives `wasm/out/seedfinder.js` via the real ABI (BigInt, HEAP32/HEAPF64, mandatory frees) and recovers fixture seed 8675309; includes a native-DLL parity probe, the scan ground-truth regression (seed 6666 / 8 villages, mirroring `server/tests/test_scan_village_groundtruth.py`), Bedrock+Java scan parity probes, and the crack64 smoke. Requires building the WASM first (`wasm/build_wasm.bat` / `.sh`).
 
-### Removed: `.github/workflows/build-lib.yml`
+### GitHub Actions: `.github/workflows/build-lib.yml`
 
-The workflow was stale (it smoke-tested deleted routes) and has been deleted. Build the `.so` manually on Linux per "Build & run (Linux)" above and commit the artifact.
+Manual-only workflow (`workflow_dispatch`, click "Run workflow") that builds the Linux `.so` on `ubuntu-latest` so nobody has to spin up a Linux box: `cmake -S core -B build_server` → smoke test (loads `build_server/seedfinder_lib.so` explicitly, asserts `seedfinder_crack`/`seedfinder_crack64_shim`/`seedfinder_scan_java`, hits `/status`, `/scan`, `/scan/java`) → uploads the `seedfinder-lib` artifact. Download the artifact and commit the `.so` to the **root of `mineseedfinder`** (where Vercel picks it up). The `server/tests/` scripts stay Windows-only (hardcoded `.dll` path) and are not part of the workflow.
 
 ## Prerequisites
 
