@@ -4,6 +4,7 @@
 #include "crack_auto.h"
 #include "crack_mt.h"
 #include "crack64.h"
+#include "ChunkBiomesGUI/Bfinders.h"
 #include "ChunkBiomesGUI/cubiomes/finders.h"
 #include "platform_threads.h"
 #include <stdio.h>
@@ -171,6 +172,190 @@ char *seedfinder_crack_auto_lift48(
                        (unsigned long long)s48.v[i]);
     sprintf(buf + off, "]}");
     free(s48.v);
+    free(hits);
+    return buf;
+}
+
+char *seedfinder_crack_auto_lift63(
+    const uint64_t *s48Seeds, int nS48,
+    const int *mtTypes, const double *mtX, const double *mtZ, int nMt,
+    int tolerance,
+    int maxResults, double timeBudgetSec)
+{
+    /* Só no modo auto: 23/24 são âncoras Java (já resolvidas pelo lift48),
+     * nunca alvos de sweep — checado antes de crackTargetsBuild. */
+    for (int i = 0; i < nMt; i++)
+        if (mtTypes[i] == Trail_Ruins || mtTypes[i] == Trial_Chambers)
+            return strdup("{\"error\":\"Trail Ruins and Trial Chambers cannot be swept - "
+                          "pass them as Java anchors\"}");
+    if (nS48 < 1)
+        return strdup("{\"error\":\"at least one s48 seed required\"}");
+    if (maxResults <= 0 || maxResults > 2000)
+        return strdup("{\"error\":\"maxResults must be between 1 and 2000\"}");
+
+    CrackTarget targets[CRACK_MAX_STRUCTURES];
+    int n = 0;
+    char *err = NULL;
+    if (crackTargetsBuild(mtTypes, nMt, mtX, mtZ, tolerance, targets, &n, &err))
+        return err;
+
+    /* Cross fail-fast com o filtro mais forte primeiro; a serialização usa a
+     * cópia em ORDEM DE ENTRADA (crackValidateSeed), então o qsort não vaza
+     * para os matches. */
+    CrackTarget ord[CRACK_MAX_STRUCTURES];
+    memcpy(ord, targets, (size_t)n * sizeof(CrackTarget));
+    qsort(ord, n, sizeof(CrackTarget), crackTargetCompare);
+
+    typedef struct { int d2, x, z; } AutoCand;
+    AutoCand *cands = malloc((size_t)n * CRACK_MAX_REGIONS * sizeof(AutoCand));
+    int *nCand = malloc((size_t)n * sizeof(int));
+    int *cOff = malloc((size_t)n * sizeof(int));
+    CrackHit *hits = calloc((size_t)maxResults, sizeof(CrackHit));
+    if (!cands || !nCand || !cOff || !hits) {
+        free(cands); free(nCand); free(cOff); free(hits);
+        return strdup("{\"error\":\"out of memory\"}");
+    }
+
+    /* Top-N com o padrão crackInsert/CrackWorker (1 thread inline — este
+     * export não tem argumento numThreads, mesmo caminho do __EMSCRIPTEN__). */
+    CrackWorker w = {0};
+    w.hits = hits;
+    w.maxResults = maxResults;
+    w.worst = INT64_MAX;
+    w.worstIdx = -1;
+
+    double deadline = (timeBudgetSec > 0.0) ? nowms_s() + timeBudgetSec * 1000.0 : 0.0;
+    Generator g;
+    setupGenerator(&g, MC_NEWEST, 0);
+    uint64_t checked = 0;
+    int timedOut = 0;
+
+    for (int i = 0; i < nS48 && !timedOut; i++) {
+        if (deadline > 0.0 && nowms_s() > deadline) { timedOut = 1; break; }
+        uint64_t s48 = s48Seeds[i] & C64_M48;
+        uint32_t s32 = (uint32_t)(s48 & 0xFFFFFFFFULL);
+
+        /* Estágio 3 (cross): células in-tolerance por âncora sob o lo32 — o
+         * placement Bedrock depende só dos 32 bits baixos (mSetSeed mascara
+         * em 32), então o mesmo conjunto serve todos os hi. */
+        int base = 0, ok = 1;
+        for (int k = 0; k < n && ok; k++) {
+            const CrackTarget *t = &ord[k];
+            int cnt = 0;
+            cOff[k] = base;
+            for (int r = 0; r < t->numRegions; r++) {
+                Pos pos;
+                if (!getBedrockStructurePos(t->type, MC_NEWEST, s32,
+                                            t->regX[r], t->regZ[r], &pos))
+                    continue;
+                long long cx = ((long long)pos.x - 8) >> 4;
+                long long cz = ((long long)pos.z - 8) >> 4;
+                long long dx = cx - t->chunkX, dz = cz - t->chunkZ;
+                long long d2 = dx * dx + dz * dz;
+                if (d2 > t->maxD2) continue;
+                AutoCand *cd = &cands[base + cnt];
+                cd->d2 = (int)d2; cd->x = pos.x; cd->z = pos.z;
+                cnt++;
+            }
+            if (cnt == 0) { ok = 0; break; }   /* âncora sem placement in-range */
+            nCand[k] = cnt;
+            base += cnt;
+        }
+        if (!ok) continue;
+
+        /* Estágio 4 (lift 48→63): por hi, escolhe por âncora o placement
+         * VIÁVEL de menor d² (best-viable, mesma semântica do
+         * testCrack64Viable — um irmão mais próximo em bioma morto não pode
+         * esconder o verdadeiro). score = soma dos d² escolhidos. */
+        for (uint64_t hi = 0; hi < (1ULL << 15); hi++) {
+            if (deadline > 0.0 && (checked & 1023ULL) == 0 &&
+                nowms_s() > deadline) { timedOut = 1; break; }
+            checked++;
+            uint64_t full = (hi << 48) | s48;
+            applySeed(&g, DIM_OVERWORLD, full);
+            int64_t score = 0;
+            int viable = 1;
+            for (int k = 0; k < n && viable; k++) {
+                int bestD = INT32_MAX;
+                for (int c = 0; c < nCand[k]; c++) {
+                    const AutoCand *cd = &cands[cOff[k] + c];
+                    if (cd->d2 > bestD) continue;  /* já temos um mais próximo */
+                    if (!structureIsViable(ord[k].type, &g, cd->x, cd->z))
+                        continue;
+                    bestD = cd->d2;
+                }
+                if (bestD == INT32_MAX) { viable = 0; break; }
+                score += bestD;
+            }
+            if (viable)
+                crackInsert(&w, full, score);
+        }
+    }
+    free(cands); free(nCand); free(cOff);
+
+    /* Re-derivação dos matches dos vencedores: chunks na ORDEM DE ENTRADA
+     * (convenção do modo auto — direct32 e lift63 compartilham; o Task 7
+     * converte chunks→blocos ao exibir). */
+    int c = w.hitCount;
+    int *m = malloc(((size_t)c > 0 ? (size_t)c : 1) * (size_t)n * 2 * sizeof(int));
+    if (!m) {
+        free(hits);
+        return strdup("{\"error\":\"out of memory\"}");
+    }
+    int kept = 0;
+    for (int i = 0; i < c; i++) {
+        int64_t vs = 0;
+        int *mm = m + (size_t)kept * (size_t)n * 2;
+        if (!crackValidateSeed(targets, n, hits[i].seed, mm, &vs))
+            continue;
+        hits[kept].seed = hits[i].seed;
+        hits[kept].score = vs;
+        kept++;
+    }
+    c = kept;
+
+    /* Insertion sort asc por score movendo as linhas de matches junto
+     * (mesmo padrão do pós-processo do seedfinder_crack). */
+    for (int i = 1; i < c; i++) {
+        CrackHit key = hits[i];
+        int kmrow[CRACK_MAX_STRUCTURES * 2];
+        const int *src = m + (size_t)i * (size_t)n * 2;
+        for (int k = 0; k < n * 2; k++) kmrow[k] = src[k];
+        int j = i - 1;
+        while (j >= 0 && hits[j].score > key.score) {
+            hits[j + 1] = hits[j];
+            for (int k = 0; k < n * 2; k++)
+                m[(size_t)(j + 1) * n * 2 + k] = m[(size_t)j * n * 2 + k];
+            j--;
+        }
+        hits[j + 1] = key;
+        for (int k = 0; k < n * 2; k++)
+            m[(size_t)(j + 1) * n * 2 + k] = kmrow[k];
+    }
+
+    /* Piores casos por item: 83 fixos (seed/seed_str/score até 20 dígitos) +
+     * 24 por par de match (coords ±1e8) + 2 — folga generosa. */
+    size_t cap = 256 + (size_t)c * ((size_t)n * 56 + 160);
+    char *buf = malloc(cap);
+    if (!buf) {
+        free(m); free(hits);
+        return strdup("{\"error\":\"out of memory\"}");
+    }
+    int off = sprintf(buf, "{\"results\":[");
+    for (int i = 0; i < c; i++) {
+        off += sprintf(buf + off,
+                       "%s{\"seed\":%lld,\"seed_str\":\"%lld\",\"score\":%lld,\"matches\":[",
+                       i ? "," : "", (long long)hits[i].seed,
+                       (long long)hits[i].seed, (long long)hits[i].score);
+        const int *mm = m + (size_t)i * (size_t)n * 2;
+        for (int k = 0; k < n; k++)
+            off += sprintf(buf + off, "%s[%d,%d]", k ? "," : "",
+                           mm[k * 2], mm[k * 2 + 1]);
+        off += sprintf(buf + off, "]}");
+    }
+    sprintf(buf + off, "],\"checked\":%llu,\"timed_out\":%s}",
+            (unsigned long long)checked, timedOut ? "true" : "false");
+    free(m);
     free(hits);
     return buf;
 }

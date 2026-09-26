@@ -221,6 +221,90 @@ def test_lift48_bad_inputs(lib):
     print("  lift48 validation errors OK")
 
 
+def lift63(lib, s48_seeds, mt, tolerance=TOLERANCE, max_results=2000,
+           budget=0.0):
+    n = len(mt)
+    types = (ctypes.c_int * n)(*(s["type"] for s in mt))
+    xs = (ctypes.c_double * n)(*(float(s["x"]) for s in mt))
+    zs = (ctypes.c_double * n)(*(float(s["z"]) for s in mt))
+    seeds = (ctypes.c_uint64 * max(len(s48_seeds), 1))(
+        *(int(s) & 0xFFFFFFFFFFFFFFFF for s in s48_seeds))
+    lib.seedfinder_crack_auto_lift63.argtypes = [
+        ctypes.POINTER(ctypes.c_uint64), ctypes.c_int,
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_double,
+    ]
+    lib.seedfinder_crack_auto_lift63.restype = ctypes.c_void_p
+    lib.seedfinder_free_result.argtypes = [ctypes.c_void_p]
+    lib.seedfinder_free_result.restype = None
+    p = lib.seedfinder_crack_auto_lift63(
+        seeds, len(s48_seeds), types, xs, zs, n, tolerance, max_results,
+        budget)
+    if not p:
+        raise RuntimeError("seedfinder_crack_auto_lift63 returned NULL")
+    try:
+        return json.loads(ctypes.string_at(p).decode("utf-8"))
+    finally:
+        lib.seedfinder_free_result(p)
+
+
+def test_lift63_recovers_full_seed(lib, mt):
+    # Lift 48->63 via bioma: um unico s48 (o do fixture 64-bit) com hi=0
+    # deve recuperar a seed completa com os 4 matches (chunks, ordem de
+    # entrada) e score pequeno (soma de d^2 <= 4 * tolerance^2).
+    data = lift63(lib, [4294972605], mt, tolerance=TOLERANCE, budget=120.0)
+    assert "error" not in data, data
+    assert "checked" in data and "timed_out" in data, sorted(data)
+    assert data["timed_out"] is False, data
+    hit = next((r for r in data["results"]
+                if r.get("seed_str") == "4294972605"), None)
+    assert hit is not None, (
+        f"seed 4294972605 missing from lift63 results "
+        f"({[r.get('seed_str') for r in data['results'][:10]]}, "
+        f"checked={data['checked']})")
+    assert len(hit["matches"]) == 4, hit
+    assert hit["score"] <= 4 * TOLERANCE * TOLERANCE, hit
+    for pair in hit["matches"]:
+        assert len(pair) == 2, hit
+    print(f"  lift63: seed 4294972605 score={hit['score']} "
+          f"matches={hit['matches']} checked={data['checked']}")
+
+
+def test_lift63_wrong_s48_empty(lib, mt):
+    # s48 errado (lo32 5310 em vez de 5309): cross + gate de bioma devem
+    # descartar tudo - resultados vazios, NAO um erro.
+    data = lift63(lib, [4294972605 + 1], mt, tolerance=TOLERANCE,
+                  budget=120.0)
+    assert "error" not in data, data
+    assert data["results"] == [], data
+    print(f"  lift63 wrong s48: empty results "
+          f"(checked={data['checked']})")
+
+
+def test_lift63_32bit_seed_via_s48(lib):
+    # Convergencia dos dois caminhos: s48 = 8675309 com hi=0 tambem acha
+    # mundos 32-bit. tolerance 0 => matches exatos na ordem de entrada.
+    from test_native_crack import FIXTURE_8675309
+    data = lift63(lib, [8675309], FIXTURE_8675309, tolerance=0, budget=120.0)
+    assert "error" not in data, data
+    hit = next((r for r in data["results"]
+                if r.get("seed_str") == "8675309"), None)
+    assert hit is not None, (
+        f"seed 8675309 missing from lift63 results "
+        f"({[r.get('seed_str') for r in data['results'][:10]]}, "
+        f"checked={data['checked']})")
+    assert hit["matches"] == [[-18, 9], [-18, -23], [43, 22], [44, 47]], hit
+    assert hit["score"] == 0, hit
+    # seed_str e' o canal seguro p/ JS: confere o decimal de TODOS os
+    # resultados (incluindo hits > 2^53 vindos de hi != 0) contra o valor.
+    assert all(r["seed_str"] == str(r["seed"]) for r in data["results"]), data
+    assert any(r["seed"] >= 2 ** 53 for r in data["results"]), (
+        "expected at least one hit above 2^53 to cover seed_str precision")
+    print(f"  lift63 32-bit via s48: score={hit['score']} "
+          f"matches={hit['matches']}")
+
+
 def main():
     lib = ctypes.CDLL(DLL)
     mt = load_mt_structures()
@@ -233,6 +317,9 @@ def main():
     test_lift48_s48_lift(lib, mt)
     test_lift48_loose_anchor_guard(lib, mt)
     test_lift48_bad_inputs(lib)
+    test_lift63_recovers_full_seed(lib, mt)
+    test_lift63_wrong_s48_empty(lib, mt)
+    test_lift63_32bit_seed_via_s48(lib)
     print("ALL AUTO SWEEP TESTS PASSED")
 
 

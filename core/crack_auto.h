@@ -39,4 +39,21 @@ SEEDFINDER_API char *seedfinder_crack_auto_lift48(
     const int *jTypes, const double *jX, const double *jZ, int nJava,
     int tolerance, int maxResults);
 
+/* Lift 48->63 via bioma: para cada s48 itera hi in [0, 2^15)
+ * (seed < 2^63 => bits 48..62), full = (hi << 48) | (s48 & 0xFFFFFFFFFFFF),
+ * e escolhe por ancora MT o placement VIAVEL de menor d2 (best-viable, mesma
+ * semantica dos estagios 3+4 de crack64.c - um irmao mais proximo em bioma
+ * morto nao esconde o verdadeiro). Cross (celulas in-tolerance sob o lo32)
+ * antes do lift; top-N via crackInsert; matches/chunks re-derivados na ordem
+ * de entrada por crackValidateSeed. Inline 1 thread (sem argumento
+ * numThreads - mesmo caminho do __EMSCRIPTEN__). JSON:
+ * {"results":[{"seed":S,"seed_str":"...","score":N,"matches":[[cx,cz],...]}],
+ * "checked":N,"timed_out":b} - vazio (nao erro) quando nada casa.
+ * Retorno malloc'd; liberar com seedfinder_free_result. */
+SEEDFINDER_API char *seedfinder_crack_auto_lift63(
+    const uint64_t *s48Seeds, int nS48,
+    const int *mtTypes, const double *mtX, const double *mtZ, int nMt,
+    int tolerance,
+    int maxResults, double timeBudgetSec);
+
 #endif
