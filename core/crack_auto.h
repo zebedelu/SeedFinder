@@ -26,4 +26,17 @@ SEEDFINDER_API char *seedfinder_crack_auto_sweep(
     int tolerance, uint64_t startSeed, uint64_t endSeed,
     int maxResults, double timeBudgetSec, int numThreads);
 
+/* Deteccao 32-bit + lift de ancoras Java. Para cada lo32 roda a validacao
+ * completa (placement + bioma) sob seed = lo32; com nJava > 0 ancora,
+ * lifta os 16 bits altos (32->48) via liftJavaHi (numThreads fixo 1, inline).
+ * JSON: {"direct32":[{"seed":S,"score":N,"matches":[[cx,cz],...]}],"s48":[S48,...]}
+ * Guard: > 1024 s48 => {"error":"too many 48-bit candidates (N) - ..."}.
+ * nJava = 0 => sem ancoras (s48 vazio). Retorno malloc'd; liberar com
+ * seedfinder_free_result. */
+SEEDFINDER_API char *seedfinder_crack_auto_lift48(
+    const int *mtTypes, const double *mtX, const double *mtZ, int nMt,
+    const uint64_t *lo32Seeds, int nLo32,
+    const int *jTypes, const double *jX, const double *jZ, int nJava,
+    int tolerance, int maxResults);
+
 #endif

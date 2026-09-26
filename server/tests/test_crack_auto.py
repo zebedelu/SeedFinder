@@ -121,6 +121,106 @@ def test_sweep_validation(lib, mt):
     print("  validation errors OK")
 
 
+def load_java_structures():
+    with open(FIXTURE_PATH, encoding="utf-8") as f:
+        fx = json.load(f)
+    return [dict(s) for s in fx["java_structures"]]
+
+
+def lift48(lib, mt, lo32_seeds, java=None, tolerance=0, max_results=2000):
+    n = len(mt)
+    types = (ctypes.c_int * n)(*(s["type"] for s in mt))
+    xs = (ctypes.c_double * n)(*(float(s["x"]) for s in mt))
+    zs = (ctypes.c_double * n)(*(float(s["z"]) for s in mt))
+    lo = (ctypes.c_uint64 * max(len(lo32_seeds), 1))(
+        *(int(s) & 0xFFFFFFFFFFFFFFFF for s in lo32_seeds))
+    java = java or []
+    jn = len(java)
+    if jn:
+        jt = (ctypes.c_int * jn)(*(s["type"] for s in java))
+        jx = (ctypes.c_double * jn)(*(float(s["x"]) for s in java))
+        jz = (ctypes.c_double * jn)(*(float(s["z"]) for s in java))
+    else:
+        jt = jx = jz = None
+    lib.seedfinder_crack_auto_lift48.argtypes = [
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_uint64), ctypes.c_int,
+        ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double),
+        ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ]
+    lib.seedfinder_crack_auto_lift48.restype = ctypes.c_void_p
+    lib.seedfinder_free_result.argtypes = [ctypes.c_void_p]
+    lib.seedfinder_free_result.restype = None
+    p = lib.seedfinder_crack_auto_lift48(
+        types, xs, zs, n, lo, len(lo32_seeds), jt, jx, jz, jn,
+        tolerance, max_results)
+    if not p:
+        raise RuntimeError("seedfinder_crack_auto_lift48 returned NULL")
+    try:
+        return json.loads(ctypes.string_at(p).decode("utf-8"))
+    finally:
+        lib.seedfinder_free_result(p)
+
+
+def test_lift48_direct32_hit(lib):
+    # FIXTURE_8675309 em tolerance 0: validacao completa (placement + bioma)
+    # sob seed = lo32 deve aceitar 8675309 com os 4 matches na ORDEM DE
+    # ENTRADA (chunks exatos dos alvos quando tol = 0) e sem lift (sem ancoras).
+    from test_native_crack import FIXTURE_8675309
+    data = lift48(lib, FIXTURE_8675309, [8675309], tolerance=0)
+    assert "error" not in data, data
+    assert data["s48"] == [], data
+    hit = next((r for r in data["direct32"] if r["seed"] == 8675309), None)
+    assert hit is not None, f"seed 8675309 missing from direct32: {data}"
+    assert hit["matches"] == [[-18, 9], [-18, -23], [43, 22], [44, 47]], hit
+    assert hit["score"] == 0, hit
+    print(f"  lift48 direct32: seed 8675309 score={hit['score']} "
+          f"matches={hit['matches']}")
+
+
+def test_lift48_s48_lift(lib, mt):
+    # Discriminador do defeito 2: o lo32 5309 NAO passa validacao completa
+    # (bioma sob 5309 difere do bioma sob a seed real), mas o lift 32->48
+    # pelas 4 Trial Chambers do fixture deve recuperar 4294972605.
+    # tol 3, nao 6 (ruling): em tol 6 as mesmas 4 ancoras rendem 3391 s48
+    # (> guard 1024 - rendimento medido, replicate por probe_lift48_yield.py).
+    data = lift48(lib, mt, [5309], java=load_java_structures(), tolerance=3)
+    assert "error" not in data, data
+    assert 4294972605 in data["s48"], f"s48 lift failed: {data}"
+    seeds32 = [r["seed"] for r in data["direct32"]]
+    assert 5309 not in seeds32, (
+        f"biome gate must reject lo32 5309 (diverges from full seed): {data}")
+    print(f"  lift48: s48={len(data['s48'])} candidates, "
+          f"4294972605 present, direct32={seeds32}")
+
+
+def test_lift48_loose_anchor_guard(lib, mt):
+    # 1 Trial Chamber com coordenada frouxa (tol 8) gera mais de 1024 s48 ->
+    # guard de viabilidade com a mensagem exata.
+    java = [{"type": 24, "x": -505, "z": -281}]
+    data = lift48(lib, mt, [5309], java=java, tolerance=8)
+    assert "error" in data, data
+    assert data["error"].startswith("too many 48-bit candidates ("), data
+    print(f"  lift48 guard: {data['error'][:80]}...")
+
+
+def test_lift48_bad_inputs(lib):
+    from test_native_crack import FIXTURE_8675309
+    data = lift48(lib, FIXTURE_8675309, [], tolerance=0)
+    assert "error" in data and "lo32" in data["error"], data
+
+    bad = [dict(s) for s in FIXTURE_8675309]
+    bad[0] = {"type": 23, "x": 0, "z": 0}
+    data = lift48(lib, bad, [8675309], tolerance=0)
+    assert data.get("error") == (
+        "Trail Ruins and Trial Chambers cannot be swept - "
+        "pass them as Java anchors"), data
+    print("  lift48 validation errors OK")
+
+
 def main():
     lib = ctypes.CDLL(DLL)
     mt = load_mt_structures()
@@ -129,6 +229,10 @@ def main():
     test_sweep_sloppy_coords(lib, mt)
     test_sweep_sorted_and_capped(lib, mt)
     test_sweep_validation(lib, mt)
+    test_lift48_direct32_hit(lib)
+    test_lift48_s48_lift(lib, mt)
+    test_lift48_loose_anchor_guard(lib, mt)
+    test_lift48_bad_inputs(lib)
     print("ALL AUTO SWEEP TESTS PASSED")
 
 
