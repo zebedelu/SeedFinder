@@ -9,7 +9,7 @@
 name = "SeedFinder"
 description = "See structure of the map with the seed, fully integrated"
 author = "zebedelu"
-version = "1.3.1"
+version = "1.4.1"
 
 -- ============================================================================
 -- Section 1: HTTP Bridge Integration
@@ -41,7 +41,7 @@ end
 
 local function checkServerAsync()
 	local now = os.clock()
-	if now - lastServerCheck < 5 then return end
+	if now - lastServerCheck < 30 then return end
 	if statusRequestInFlight then return end
 	lastServerCheck = now
 	statusRequestInFlight = true
@@ -66,6 +66,34 @@ local function checkServerAsync()
 				serverWarned = true
 				log("SeedFinder: Failed to reach server at " .. SERVER_URL)
 			end
+		end
+	end)
+end
+
+-- Update check for the script itself: compares our `version` field with the
+-- one on GitHub (raw file on main). One fetch per session, silent on failure.
+local RAW_SCRIPT_URL = "https://raw.githubusercontent.com/zebedelu/SeedFinder/main/script/SeedFinder.lua"
+local scriptUpdate = nil
+
+local function versionIsNewer(a, b)
+	local pa, pb = {}, {}
+	for n in a:gmatch("%d+") do pa[#pa + 1] = tonumber(n) end
+	for n in b:gmatch("%d+") do pb[#pb + 1] = tonumber(n) end
+	for i = 1, math.max(#pa, #pb) do
+		local x, y = pa[i] or 0, pb[i] or 0
+		if x > y then return true end
+		if x < y then return false end
+	end
+	return false
+end
+
+local function checkScriptUpdateAsync()
+	network.getAsync(RAW_SCRIPT_URL, function(response, statusCode, success)
+		if not success or type(response) ~= "string" then return end
+		local remote = response:match('version%s*=%s*"(%d+%.%d+%.%d+)"')
+		if remote and versionIsNewer(remote, version) then
+			scriptUpdate = remote
+			log("SeedFinder: new script version available: " .. remote)
 		end
 	end)
 end
@@ -424,7 +452,7 @@ local function onTick()
 	end
 	rescanKeyHeld = rescanKeyDown
 
-	-- Keep the status check alive independently (throttled to every 5s inside checkServerAsync)
+	-- Keep the status check alive independently (throttled to every 30s inside checkServerAsync)
 	checkServerAsync()
 
 	if not needsRescan then return end
@@ -483,6 +511,9 @@ local function onRender()
 	ImGui.Text("Check mineseedfinder.vercel.app for possible updates! 😊")
 	ImGui.Text("If you really like this project, give a star on our GitHub!")
 	ImGui.Text("https://github.com/zebedelu/SeedFinder")
+	if scriptUpdate then
+		ImGui.Text("New script version: " .. scriptUpdate .. " - github.com/zebedelu/SeedFinder")
+	end
 
 	ImGui.End()
 end
@@ -494,6 +525,7 @@ end
 function onLoad()
 	log("SeedFinder loaded")
 	log("Server URL field empty = hosted API at " .. HOSTED_URL)
+	checkScriptUpdateAsync()
 end
 
 function onEnable()
