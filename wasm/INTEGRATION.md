@@ -198,6 +198,85 @@ counts vêm DEPOIS dos arrays de coordenadas, NÃO no padrão do crack de 32 bit
 seeds → `UTF8ToString` → `JSON.parse` → `_seedfinder_free_result` +
 `_free`×6 no `finally`.
 
+### 3.3 Varredura automática — `_seedfinder_crack_auto_sweep`
+
+```c
+char *seedfinder_crack_auto_sweep(const int *types, int numTypes,
+                                  const double *xBlocks, const double *zBlocks,
+                                  int tolerance, uint64_t startSeed,
+                                  uint64_t endSeed, int maxResults,
+                                  double timeBudgetSec, int numThreads);
+```
+
+Mesmas convenções de heap/BigInt do §3.1 (coords em **BLOCOS**, `startSeed`/`endSeed`
+**`BigInt`**, `numThreads` sempre 1 no WASM). É o passo 1 do modo automático.
+
+| Semântica | Detalhe |
+|---|---|
+| **Placement-only** | **Não** aplica o gate de bioma — é o fix do defeito 2: o crack de 32 bits de hoje descarta o lo32 real de mundos 64-bit (o bioma sob `seed = lo32` diverge). O `auto_sweep` devolve o lo32 ranqueado por score |
+| Tipos 23/24 | **Rejeitados** aqui (`Trail Ruins and Trial Chambers cannot be swept - pass them as Java anchors`) — vão como âncoras no `_lift48` |
+| Retorno | `{"results":[{"seed":N,"score":N}],"checked":N,"timed_out":b,"threads":1}` — **sem `matches`** (não há validação de seed) |
+| `results` | ordenado por `score` ascendente, capado em `maxResults` |
+
+### 3.4 Detecção 32-bit + lift de âncoras — `_seedfinder_crack_auto_lift48`
+
+```c
+char *seedfinder_crack_auto_lift48(const int *mtTypes, const double *mtX,
+                                   const double *mtZ, int nMt,
+                                   const uint64_t *lo32Seeds, int nLo32,
+                                   const int *jTypes, const double *jX,
+                                   const double *jZ, int nJava,
+                                   int tolerance, int maxResults);
+```
+
+Passo 2 do modo automático. Dois trabalhos no mesmo retorno:
+
+| Param | Tipo JS | Notas |
+|---|---|---|
+| `mtTypes/mtX/mtZ` + `nMt` | `Int32Array`, `Float64Array`, `number` | Estruturas comuns (IDs 1–11, 13, 14; 23/24 **rejeitados**), coords em **BLOCOS** |
+| `lo32Seeds` + `nLo32` | **`BigInt64Array` sobre `HEAP64`** (`_malloc(n*8)`) | Candidatos do sweep, ordem de score. **Nunca `Number`/`Float64Array`** — são `uint64_t*` |
+| `jTypes/jX/jZ` + `nJava` | `Int32Array`, `Float64Array`, `number` | Âncoras Java-style (**só 23/24**); `nJava = 0` = detecção de mundo 32-bit sem lift |
+| `tolerance` / `maxResults` | `number` | 0–8 / 1–2000 (o `maxResults` corta `direct32`) |
+
+| Retorno | Significado |
+|---|---|
+| `direct32` | lo32 que passam validação **completa** (placement + bioma) sob `seed = lo32` → mundo 32-bit. Cada item: `{"seed","score","matches":[[cx,cz],...]}` (matches em **chunks**, ordem de entrada) |
+| `s48` | sobreviventes do lift 32→48 pelas âncoras. **Números seguros no JSON** (< 2^48 < 2^53) |
+
+**Guard:** `nS48 > 1024` → `{"error":"too many 48-bit candidates (N) - add more
+Trial Chambers/Trail Ruins or enter their corner coordinates more precisely"}`.
+O guard limita o custo do `_lift63` (3.3 s por s48 single-thread): o chamador
+não deve passar os 2000 lo32 do sweep com âncoras de uma vez — meça com a
+tolerância do usuário (medido com 4 Trial Chambers + lo32 5309: tol 2 → 68,
+tol 4 → 1134, tol 6 → 3391 s48).
+
+### 3.5 Lift 48→63 — `_seedfinder_crack_auto_lift63`
+
+```c
+char *seedfinder_crack_auto_lift63(const uint64_t *s48Seeds, int nS48,
+                                   const int *mtTypes, const double *mtX,
+                                   const double *mtZ, int nMt,
+                                   int tolerance, int maxResults,
+                                   double timeBudgetSec);
+```
+
+Passo 3 do modo automático: para cada s48 varre `hi ∈ [0, 2^15)` (bits 48..62 do
+seed < 2^63), aplica o bioma e escolhe por âncora o placement **viável** de menor
+distância — o `score` é a soma dessas distâncias.
+
+| Param | Tipo JS | Notas |
+|---|---|---|
+| `s48Seeds` + `nS48` | **`BigInt64Array` sobre `HEAP64`** | saída do `_lift48` (semântica idêntica se você passar os `s48` crus) |
+| `mtTypes/mtX/mtZ` + `nMt` | `Int32Array`, `Float64Array`, `number` | mesmas estruturas MT do sweep, coords em **BLOCOS** |
+| `tolerance` / `maxResults` | `number` | idem §3.1 |
+| `timeBudgetSec` | `number` | `0` = sem limite; a checagem do deadline roda a cada 1024 `hi` (~0.15 s), então budgets menores que isso são tratados como ~0.15 s |
+
+Retorno: `{"results":[{"seed":N,"seed_str":"...","score":N,"matches":[[cx,cz]]}],
+"checked":N,"timed_out":b}`. **`seed_str` é sempre presente** e é o canal seguro:
+o campo `seed` passa por `number` e perde precisão acima de 2^53. Matches em
+**chunks** (mesma convenção do `direct32` — diverge de propósito do crack64, que
+emite blocos; quem exibe converte). Um `results` vazio **não** é erro.
+
 ## 4. Retorno e disciplina de memória
 
 Fluxo obrigatório, **todo caminho de execução** (vale para scan, crack e
@@ -316,6 +395,16 @@ Notas:
 | `maxResults` | 1–2000 | `maxResults must be between 1 and 2000` |
 | `startSeed`/`endSeed` | `start < end` (32 bits) | `empty seed range` |
 | Coordenadas (blocos) | **±1e9** | `coordinates out of range` / `invalid coordinates` (NaN/inf) |
+| `auto_sweep`: tipos 23/24 | **rejeitados** (são âncoras, não alvos de sweep) | `Trail Ruins and Trial Chambers cannot be swept - pass them as Java anchors` |
+| `auto_lift48`: `nLo32` | ≥ 1 | `at least one lo32 seed required` |
+| `auto_lift48`: yield de s48 | **≤ 1024** (guard do modo automático) | `too many 48-bit candidates (N) - add more Trial Chambers/Trail Ruins or enter their corner coordinates more precisely` |
+| `auto_lift63`: `nS48` | ≥ 1 | `at least one s48 seed required` |
+
+**O guard do modo automático (`nS48 > 1024`) é o análogo do guard abaixo, só que
+por contagem em vez de amostra:** o `_lift63` custa ~3.3 s por s48
+single-thread (32768 `hi` × `applySeed` + gate), então 1024 s48 ≈ 56 min
+single-thread / ~7 min em 8 workers. Ele existe para empurrar o usuário a
+ancorar melhor, não para limitar a fofura do pipeline.
 
 **Full-range 64-bit (span ≥ 2³²) tem um guard próprio.** O stage 4 (resolução dos
 16 bits altos) custa `#s48 × 2^16 × ~150 µs` (`applySeed` + gate de bioma), então
@@ -893,3 +982,11 @@ Regras do scheduler:
    (`require`/global).
 7. `numThreads` **sempre 1** — o paralelismo é JS (workers-por-fatia), não do
    motor.
+8. **Os `uint64_t*` do modo automático (`lo32Seeds`, `s48Seeds`) só se leem
+   via `BigInt64Array` sobre `m.HEAP64`**, com a view criada **depois** do
+   `_malloc` (o §3 regra: view fresca por chamada; `HEAP64` só existe porque
+   está em `EXPORTED_RUNTIME_METHODS`). `Float64Array`/`Number` truncaria os
+   bits acima de 2^53 — e `WASM_BIGINT` faz os escalares `startSeed`/`endSeed`
+   chegarem como `BigInt`, nunca `number`. No retorno, `s48` é seguro como
+   número no JSON, mas a **seed final sempre se compara por `seed_str`**
+   (`seed` passa por `number` e perde precisão acima de 2^53).
