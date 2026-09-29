@@ -217,6 +217,8 @@ curl -X POST http://127.0.0.1:7890/seedcracker \
 
 ## API reference
 
+The hosted API has a rate limit of 60 requests per IP per minute. A local server (`http://127.0.0.1:7890`) has no such limit.
+
 ### `GET /status`
 
 ```json

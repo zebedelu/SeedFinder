@@ -449,7 +449,7 @@ data = requests.get(url, params=params).json()
     SeedCracker
   </div>
   <div class="section-desc">
-    Give it the coordinates of 4 or more structures and it searches for a world where those structures land exactly where you placed them. For now it works on Bedrock only; Java is a possibility down the road, and the Bedrock search itself still has room to improve. Sends a <code>POST /seedcracker</code> request.
+    Give it the coordinates of 4 or more structures and it searches for a world where those structures land exactly where you placed them. For now it works on Bedrock only; Java is a possibility down the road. Sends a <code>POST /seedcracker</code> request.
   </div>
 
   <div class="playground">
