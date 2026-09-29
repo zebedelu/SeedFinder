@@ -162,10 +162,12 @@ static int testSweepMTTimeout(void) {
 // FULL±2^24, max 100, 120 s, 2 threads.
 static int testCrack64(void) {
     const uint64_t FULL = 7777777777777777777ULL;
-    // 1 trial chamber alvo (âncora 2^48):
+    // 1 trial chamber alvo (âncora 2^48) — bloco CRUA, como o scan entrega:
+    // anchor48Build extrai o chunk alvo com (bloco - 8) >> 4, mesmo espaço
+    // do javaChunk, então a posição exata pontua d2 = 0.
     Pos p; assert(getStructurePos(Trial_Chambers, MC_NEWEST, FULL, 0, 0, &p));
     int    jT[1] = { Trial_Chambers };
-    double jX[1] = { (double)((p.x - 8) >> 4) * 16 }, jZ[1] = { (double)((p.z - 8) >> 4) * 16 };
+    double jX[1] = { (double)p.x }, jZ[1] = { (double)p.z };
     // 1 estrutura MT alvo (âncora mod 2^32) — posiciona com seed32 = FULL & M32:
     Pos q; assert(getBedrockStructurePos(Igloo, MC_NEWEST, FULL & 0xFFFFFFFFULL, 2, -3, &q));
     int    mT[1] = { Igloo };
@@ -218,7 +220,7 @@ static int testCrack64Viable(void) {
     // Trial Chambers anchor (same as testCrack64) pins the s48 window.
     Pos p; assert(getStructurePos(Trial_Chambers, MC_NEWEST, FULL, 0, 0, &p));
     int    jT[1] = { Trial_Chambers };
-    double jX[1] = { (double)((p.x - 8) >> 4) * 16 }, jZ[1] = { (double)((p.z - 8) >> 4) * 16 };
+    double jX[1] = { (double)p.x }, jZ[1] = { (double)p.z };
     int    mT[1] = { Ocean_Ruin };
     double mX[1] = { (double)ox }, mZ[1] = { (double)oz };
 
@@ -306,8 +308,8 @@ static int testFullRangePrecheck(void) {
     //  stage A (erro diferente), provando que o pre-check nao bloqueou.
     int jT[1] = { Trial_Chambers };
     Pos jp; assert(getStructurePos(Trial_Chambers, MC_NEWEST, 4294972605ULL, 0, 0, &jp));
-    double jX[1] = { (double)((jp.x - 8) >> 4) * 16 };
-    double jZ[1] = { (double)((jp.z - 8) >> 4) * 16 };
+    double jX[1] = { (double)jp.x };
+    double jZ[1] = { (double)jp.z };
 
     int mT4[4] = { Desert_Pyramid, Igloo, Jungle_Pyramid, Swamp_Hut };
     double x4[4] = { -3048, -280, 2584, 2136 };
@@ -345,8 +347,8 @@ static int testFullRangeRecovery(void) {
     Pos p; assert(getStructurePos(Trial_Chambers, MC_NEWEST, FULL, 0, 0, &p));
     Pos p2; assert(getStructurePos(Trial_Chambers, MC_NEWEST, FULL, 3, -2, &p2));
     int    jT[2] = { Trial_Chambers, Trial_Chambers };
-    double jX[2] = { (double)((p.x - 8) >> 4) * 16, (double)((p2.x - 8) >> 4) * 16 };
-    double jZ[2] = { (double)((p.z - 8) >> 4) * 16, (double)((p2.z - 8) >> 4) * 16 };
+    double jX[2] = { (double)p.x, (double)p2.x };
+    double jZ[2] = { (double)p.z, (double)p2.z };
     int    mT[3] = { Igloo, Jungle_Pyramid, Swamp_Hut };
     double mX[3], mZ[3];
     uint32_t lo32 = (uint32_t)(FULL & 0xFFFFFFFFULL);

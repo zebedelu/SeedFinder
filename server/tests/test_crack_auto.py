@@ -228,25 +228,36 @@ def test_lift48_bad_inputs(lib):
 
 
 def lift63(lib, s48_seeds, mt, tolerance=TOLERANCE, max_results=2000,
-           budget=0.0):
+           budget=0.0, java=None):
     n = len(mt)
     types = (ctypes.c_int * n)(*(s["type"] for s in mt))
     xs = (ctypes.c_double * n)(*(float(s["x"]) for s in mt))
     zs = (ctypes.c_double * n)(*(float(s["z"]) for s in mt))
     seeds = (ctypes.c_uint64 * max(len(s48_seeds), 1))(
         *(int(s) & 0xFFFFFFFFFFFFFFFF for s in s48_seeds))
+    java = java or []
+    jn = len(java)
+    if jn:
+        jt = (ctypes.c_int * jn)(*(s["type"] for s in java))
+        jx = (ctypes.c_double * jn)(*(float(s["x"]) for s in java))
+        jz = (ctypes.c_double * jn)(*(float(s["z"]) for s in java))
+    else:
+        jt = jx = jz = None
     lib.seedfinder_crack_auto_lift63.argtypes = [
         ctypes.POINTER(ctypes.c_uint64), ctypes.c_int,
         ctypes.POINTER(ctypes.c_int),
         ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double),
         ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_double,
     ]
     lib.seedfinder_crack_auto_lift63.restype = ctypes.c_void_p
     lib.seedfinder_free_result.argtypes = [ctypes.c_void_p]
     lib.seedfinder_free_result.restype = None
     p = lib.seedfinder_crack_auto_lift63(
-        seeds, len(s48_seeds), types, xs, zs, n, tolerance, max_results,
-        budget)
+        seeds, len(s48_seeds), types, xs, zs, n, jt, jx, jz, jn,
+        tolerance, max_results, budget)
     if not p:
         raise RuntimeError("seedfinder_crack_auto_lift63 returned NULL")
     try:
@@ -389,7 +400,7 @@ def test_auto_pipeline_e2e(lib, mt):
                   f"rank1={lo64[0]} em {time.time() - t0:.1f}s")
             t0 = time.time()
             d63 = lift63(lib, d48["s48"], mt, tolerance=E2E_TOLERANCE,
-                         budget=0.0)
+                         budget=0.0, java=java)
             dt63 = time.time() - t0
             if "error" in d63:
                 failures.append(f"lift63: {d63['error']}")

@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 char *seedfinder_crack_auto_sweep(
     const int *types, int numTypes,
@@ -92,14 +93,28 @@ char *seedfinder_crack_auto_lift48(
     if (maxResults <= 0 || maxResults > 2000)
         return strdup("{\"error\":\"maxResults must be between 1 and 2000\"}");
 
+    /* Alvos combinados mt→java numa unica ordem de entrada: o direct32 só
+     * valida 32-bit quando TODO o layout casa (placement + bioma) sob
+     * seed = lo32 — sem as âncoras o placement-only ruidoso passava e comitava
+     * "32-bit world" sem nunca rodar o lift (fix 2026-09-26). */
+    if (nMt + nJava > CRACK_MAX_STRUCTURES)
+        return strdup("{\"error\":\"too many structures (max 24)\"}");
+    int cT[CRACK_MAX_STRUCTURES];
+    double cX[CRACK_MAX_STRUCTURES], cZ[CRACK_MAX_STRUCTURES];
+    for (int i = 0; i < nMt; i++) {
+        cT[i] = mtTypes[i]; cX[i] = mtX[i]; cZ[i] = mtZ[i];
+    }
+    for (int i = 0; i < nJava; i++) {
+        cT[nMt + i] = jTypes[i]; cX[nMt + i] = jX[i]; cZ[nMt + i] = jZ[i];
+    }
     CrackTarget targets[CRACK_MAX_STRUCTURES];
     int n = 0;
     char *err = NULL;
-    if (crackTargetsBuild(mtTypes, nMt, mtX, mtZ, tolerance, targets, &n, &err))
+    if (crackTargetsBuild(cT, nMt + nJava, cX, cZ, tolerance, targets, &n, &err))
         return err;
 
-    /* direct32: validação completa (placement + bioma) sob seed = lo32,
-     * matches na ordem de entrada, cap em maxResults. */
+    /* direct32: validação completa dos alvos combinados (mt→java), matches na
+     * ordem de entrada, cap em maxResults. */
     typedef struct { uint64_t seed; int64_t score; int match[2 * CRACK_MAX_STRUCTURES]; } AutoHit;
     AutoHit *hits = malloc((size_t)maxResults * sizeof(AutoHit));
     if (!hits)
@@ -116,11 +131,11 @@ char *seedfinder_crack_auto_lift48(
         }
     }
 
-    /* Lift 32->48 pelas âncoras Java (nJava = 0 => sem lift). Chamada única
-     * com a lista inteira; numThreads fixo 1 (inline — sem criação de
-     * thread neste export, mesmo padrão do caminho Emscripten). */
+    /* Lift 32->48 pelas âncoras Java. Gate nLo32 == 1: a fase 2 (detecção,
+     * lista inteira do sweep) só quer o direct32 — liftar 2000 lo32 estouraria
+     * o guard de 1024; a fase 3 passa só o rank1. */
     U64Vec s48 = {0};
-    if (nJava > 0) {
+    if (nJava > 0 && nLo32 == 1) {
         Anchor48 anc;
         if (anchor48Build(&anc, jTypes, jX, jZ, nJava, tolerance) != 0) {
             free(hits);
@@ -185,9 +200,28 @@ static int autoCandCmp(const void *a, const void *b)
     return (x->d2 > y->d2) - (x->d2 < y->d2);
 }
 
+/* d² da âncora j sob s48 (placement Java-style, constante por s48) e chunk de
+ * canto da melhor célula em mx/mz: javaChunk devolve (bloco-8)>>4, o +1 é o
+ * chunk de canto floor(bloco/16) — a UI reconstrói o bloco com *16. */
+static int64_t anchorBest(const Anchor48 *a, int j, uint64_t s48, int *mx, int *mz)
+{
+    long long best = LLONG_MAX;
+    int bx = 0, bz = 0;
+    for (int r = 0; r < a->nRegions[j]; r++) {
+        long long cx, cz;
+        javaChunk(&a->cfg[j], s48, a->regX[j][r], a->regZ[j][r], &cx, &cz);
+        long long dx = cx - a->chunkX[j], dz = cz - a->chunkZ[j];
+        long long d2 = dx * dx + dz * dz;
+        if (d2 < best) { best = d2; bx = (int)(cx + 1); bz = (int)(cz + 1); }
+    }
+    *mx = bx; *mz = bz;
+    return (int64_t)best;
+}
+
 char *seedfinder_crack_auto_lift63(
     const uint64_t *s48Seeds, int nS48,
     const int *mtTypes, const double *mtX, const double *mtZ, int nMt,
+    const int *jTypes, const double *jX, const double *jZ, int nJava,
     int tolerance,
     int maxResults, double timeBudgetSec)
 {
@@ -201,12 +235,23 @@ char *seedfinder_crack_auto_lift63(
         return strdup("{\"error\":\"at least one s48 seed required\"}");
     if (maxResults <= 0 || maxResults > 2000)
         return strdup("{\"error\":\"maxResults must be between 1 and 2000\"}");
+    if (nMt + nJava > CRACK_MAX_STRUCTURES)
+        return strdup("{\"error\":\"too many structures (max 24)\"}");
 
     CrackTarget targets[CRACK_MAX_STRUCTURES];
     int n = 0;
     char *err = NULL;
     if (crackTargetsBuild(mtTypes, nMt, mtX, mtZ, tolerance, targets, &n, &err))
         return err;
+
+    /* Âncoras Java (nJava = 0 => score só das MT). Erro de validação vem com a
+     * mensagem acionável do próprio lift48 — repassar em vez de mascarar. */
+    Anchor48 anc = {0};
+    if (nJava > 0 && anchor48Build(&anc, jTypes, jX, jZ, nJava, tolerance) != 0)
+        return strdup("{\"error\":\"invalid Java anchors (Trail Ruins=23 / "
+                      "Trial Chambers=24 with valid coordinates)\"}");
+
+    int nPairs = nMt + nJava;
 
     /* Cross fail-fast com o filtro mais forte primeiro; a serialização usa a
      * cópia em ORDEM DE ENTRADA (crackValidateSeed), então o qsort não vaza
@@ -242,6 +287,17 @@ char *seedfinder_crack_auto_lift63(
         if (deadline > 0.0 && nowms_s() > deadline) { timedOut = 1; break; }
         uint64_t s48 = s48Seeds[i] & C64_M48;
         uint32_t s32 = (uint32_t)(s48 & 0xFFFFFFFFULL);
+
+        /* d² das âncoras é constante por s48 (placement Java-style usa só os
+         * 48 bits baixos): soma ao score para o lo48 verdadeiro (d² = 0 nas
+         * âncoras) rankear acima dos falsos que passaram pela tolerância do
+         * lift48 — sem isso todas as candidatas empatavam em 0 (o placement MT
+         * só depende do lo32, que o sweep já acertou). */
+        int64_t ancD2 = 0;
+        for (int j = 0; nJava > 0 && j < nJava; j++) {
+            int ax, az;
+            ancD2 += anchorBest(&anc, j, s48, &ax, &az);
+        }
 
         /* Estágio 3 (cross): células in-tolerance por âncora sob o lo32 — o
          * placement Bedrock depende só dos 32 bits baixos (mSetSeed mascara
@@ -300,16 +356,16 @@ char *seedfinder_crack_auto_lift63(
                 score += bestD;
             }
             if (viable)
-                crackInsert(&w, full, score);
+                crackInsert(&w, full, score + ancD2);
         }
     }
     free(cands); free(nCand); free(cOff);
 
     /* Re-derivação dos matches dos vencedores: chunks na ORDEM DE ENTRADA
-     * (convenção do modo auto — direct32 e lift63 compartilham; o Task 7
-     * converte chunks→blocos ao exibir). */
+     * mt→java (convenção do modo auto — direct32 e lift63 compartilham; o
+     * Task 7 converte chunks→blocos ao exibir, *16 para 23/24). */
     int c = w.hitCount;
-    int *m = malloc(((size_t)c > 0 ? (size_t)c : 1) * (size_t)n * 2 * sizeof(int));
+    int *m = malloc(((size_t)c > 0 ? (size_t)c : 1) * (size_t)nPairs * 2 * sizeof(int));
     if (!m) {
         free(hits);
         return strdup("{\"error\":\"out of memory\"}");
@@ -317,9 +373,19 @@ char *seedfinder_crack_auto_lift63(
     int kept = 0;
     for (int i = 0; i < c; i++) {
         int64_t vs = 0;
-        int *mm = m + (size_t)kept * (size_t)n * 2;
+        int *mm = m + (size_t)kept * (size_t)nPairs * 2;
         if (!crackValidateSeed(targets, n, hits[i].seed, mm, &vs))
             continue;
+        /* Âncoras: d² no score + chunk de canto nos matches. */
+        if (nJava > 0) {
+            uint64_t s48 = hits[i].seed & C64_M48;
+            for (int j = 0; j < nJava; j++) {
+                int ax, az;
+                vs += anchorBest(&anc, j, s48, &ax, &az);
+                mm[(nMt + j) * 2] = ax;
+                mm[(nMt + j) * 2 + 1] = az;
+            }
+        }
         hits[kept].seed = hits[i].seed;
         hits[kept].score = vs;
         kept++;
@@ -331,23 +397,23 @@ char *seedfinder_crack_auto_lift63(
     for (int i = 1; i < c; i++) {
         CrackHit key = hits[i];
         int kmrow[CRACK_MAX_STRUCTURES * 2];
-        const int *src = m + (size_t)i * (size_t)n * 2;
-        for (int k = 0; k < n * 2; k++) kmrow[k] = src[k];
+        const int *src = m + (size_t)i * nPairs * 2;
+        for (int k = 0; k < nPairs * 2; k++) kmrow[k] = src[k];
         int j = i - 1;
         while (j >= 0 && hits[j].score > key.score) {
             hits[j + 1] = hits[j];
-            for (int k = 0; k < n * 2; k++)
-                m[(size_t)(j + 1) * n * 2 + k] = m[(size_t)j * n * 2 + k];
+            for (int k = 0; k < nPairs * 2; k++)
+                m[(size_t)(j + 1) * nPairs * 2 + k] = m[(size_t)j * nPairs * 2 + k];
             j--;
         }
         hits[j + 1] = key;
-        for (int k = 0; k < n * 2; k++)
-            m[(size_t)(j + 1) * n * 2 + k] = kmrow[k];
+        for (int k = 0; k < nPairs * 2; k++)
+            m[(size_t)(j + 1) * nPairs * 2 + k] = kmrow[k];
     }
 
     /* Piores casos por item: 83 fixos (seed/seed_str/score até 20 dígitos) +
      * 24 por par de match (coords ±1e8) + 2 — folga generosa. */
-    size_t cap = 256 + (size_t)c * ((size_t)n * 56 + 160);
+    size_t cap = 256 + (size_t)c * ((size_t)nPairs * 56 + 160);
     char *buf = malloc(cap);
     if (!buf) {
         free(m); free(hits);
@@ -359,8 +425,8 @@ char *seedfinder_crack_auto_lift63(
                        "%s{\"seed\":%lld,\"seed_str\":\"%lld\",\"score\":%lld,\"matches\":[",
                        i ? "," : "", (long long)hits[i].seed,
                        (long long)hits[i].seed, (long long)hits[i].score);
-        const int *mm = m + (size_t)i * (size_t)n * 2;
-        for (int k = 0; k < n; k++)
+        const int *mm = m + (size_t)i * nPairs * 2;
+        for (int k = 0; k < nPairs; k++)
             off += sprintf(buf + off, "%s[%d,%d]", k ? "," : "",
                            mm[k * 2], mm[k * 2 + 1]);
         off += sprintf(buf + off, "]}");

@@ -49,8 +49,12 @@ int anchor48Build(Anchor48 *a, const int *types, const double *xb, const double 
     for (int i = 0; i < n; i++) {
         JavaCfg c;
         if (!javaCfgFor(types[i], &c)) return -1; // chamador valida antes; cinto de seguranca
-        long long cx = (xb[i] >= 0) ? (long long)xb[i] / 16 : ((long long)xb[i] - 15) / 16;
-        long long cz = (zb[i] >= 0) ? (long long)zb[i] / 16 : ((long long)zb[i] - 15) / 16;
+        /* Chunk alvo em (bloco - 8) >> 4 — o mesmo espaco do javaChunk (parity
+         * fixo por test_crack64) e do crackValidateSeed. floor(bloco/16) ficava
+         * 1 chunk aquem para blocos de canto (d2 = 2 na posicao exata), o que
+         * punia a seed verdadeira e quebrava tolerancia 0/1. */
+        long long cx = ((long long)xb[i] - 8) >> 4;
+        long long cz = ((long long)zb[i] - 8) >> 4;
         int j = a->nJava++;
         a->cfg[j] = c; a->chunkX[j] = cx; a->chunkZ[j] = cz;
         // celulas candidatas: mesma formula de regiao do seedfinder_crack (floor-div)
