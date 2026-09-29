@@ -33,7 +33,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--check-update",
         action="store_true",
-        help="Run the interactive update check (like the frozen exe) and exit",
+        help="Print the update notice (like the frozen exe) and exit",
     )
     args = parser.parse_args()
 
@@ -50,7 +50,7 @@ if __name__ == "__main__":
                          native.lib is not None)
     frozen = getattr(sys, "frozen", False)
     if frozen or args.check_update:
-        console.check_for_update(allow_swap=frozen)
+        console.check_for_update()
         if args.check_update:
             sys.exit(0)
     app.run(host=args.host, port=args.port, debug=False)

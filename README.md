@@ -360,6 +360,16 @@ python server\build_exe.py
 REM Output: server\dist\SeedFinder.exe
 ```
 
+**Code-sign the exe** (recommended for releases — browsers/antiviruses treat unsigned, no-reputation downloads as suspicious):
+
+```bat
+REM Needs a purchased code-signing certificate (OV/EV, issued on a USB token
+REM or cloud HSM since 2023) and signtool.exe from the Windows 10/11 SDK.
+set SEEDFINDER_SIGN_THUMBPRINT=<SHA1 thumbprint do certificado>
+python server\build_exe.py
+REM Or with a PFX file: set SEEDFINDER_SIGN_PFX=C:\path\cert.pfx (+ SEEDFINDER_SIGN_PFX_PASSWORD)
+```
+
 **Install the Lua module** - see [`script/INSTALL.txt`](script/INSTALL.txt).
 
 ## Benchmarks
