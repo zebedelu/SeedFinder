@@ -110,13 +110,39 @@ static int testGuard(void)
     return ok;
 }
 
+/* LIFTING: 5 estruturas liftaveis, tolerance 0. A completacao custa
+ * ~survCount x 2^29; a janela [FIX2-1000, FIX2+1000) limita o range de hi a
+ * ~2 valores, mantendo o teste < 1s. Estruturas agrupadas na mesma regiao
+ * correlacionam o filtro %4 (survCount alto) - a janela estreita absorve isso.
+ * O espaco 2^48 completo continua coberto: o seed verdadeiro tem hi = 8192,
+ * dentro da janela. */
+static int testLift(void)
+{
+    int types[] = { Igloo, Desert_Pyramid, Jungle_Temple, Swamp_Hut, Outpost };
+    Pos p[5][8];
+    double xs[5], zs[5];
+    for (int i = 0; i < 5; i++) {
+        int got = genStructures(types[i], FIX2, p[i], 8);
+        if (got < 1) return 0;
+        xs[i] = (double)p[i][0].x; zs[i] = (double)p[i][0].z;
+    }
+    char *r = seedfinder_crack_java(types, 5, xs, zs, 0,
+                                    FIX2 - 1000, FIX2 + 1000, 50, 30.0, 8);
+    if (!r) return 0;
+    int ok = (strstr(r, "\"seed\":4294972605") != NULL);
+    free(r);
+    return ok;
+}
+
 int main(void)
 {
     if (!testConvention()) { printf("FAIL convention\n"); return 1; }
     if (!testVerifier())   { printf("FAIL verifier\n");   return 1; }
     if (!testSweep())      { printf("FAIL sweep\n");      return 1; }
     if (!testGuard())      { printf("FAIL guard\n");      return 1; }
+    if (!testLift())       { printf("FAIL lifting\n");    return 1; }
     printf("OK parity + verifier\n");
     printf("OK sweep + guard\n");
+    printf("OK lifting\n");
     return 0;
 }

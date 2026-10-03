@@ -266,6 +266,149 @@ static char *jvSerialize(JvRun *run, int n, int numThreads)
     return buf;
 }
 
+/* Teste %4 dos 19 bits baixos: os bits 17-18 do estado avancado sao
+ * determinados por lo19 (LCG mod 2^19 e' bijectivo). tolerance == 0 aqui. */
+static int jvLiftTest(const JavaTarget *targets, int n, uint64_t lo19)
+{
+    int order[JAVA_MAX_STRUCTURES];
+    jvOrder(targets, n, order);
+    for (int k = 0; k < n; k++) {
+        const JavaTarget *t = &targets[order[k]];
+        int ok = 0;
+        for (int r = 0; r < t->numRegions && !ok; r++) {
+            uint64_t rx = (uint64_t)(int64_t)t->regX[r];
+            uint64_t rz = (uint64_t)(int64_t)t->regZ[r];
+            uint64_t rl = (lo19 + rx * JV_A + rz * JV_B
+                           + (uint64_t)(int32_t)t->cfg.salt) & JV_M19;
+            uint64_t al = ((rl ^ (JV_K & JV_M19)) * JV_K + JV_ADD) & JV_M19;
+            int ox = (int)((al >> 17) & 3);
+            al = (al * JV_K + JV_ADD) & JV_M19;
+            int oz = (int)((al >> 17) & 3);
+            long long ox0 = t->chunkX - (long long)t->regX[r] * (long long)t->cfg.regionSize;
+            long long oz0 = t->chunkZ - (long long)t->regZ[r] * (long long)t->cfg.regionSize;
+            if (ox == (int)(ox0 & 3) && oz == (int)(oz0 & 3)) { ok = 1; break; }
+        }
+        if (!ok) return 0;
+    }
+    return 1;
+}
+
+typedef struct {
+    const JavaTarget *targets; int n;
+    uint64_t start, end;          /* filtro de range na completacao */
+    int maxResults; double deadline; volatile int *stop;
+    uint64_t checked;
+    JavaHit *hits; int hitCount; int64_t worst; int worstIdx;
+    int *matches;
+    /* jvInsert: JvLiftWorker e' layout-compativel com JvWorker — os campos que
+     * jvInsert le (n, maxResults, deadline, stop, hits, hitCount, worst,
+     * worstIdx, matches) ocupam os MESMOS offsets do JvWorker; surv/nSurv vem
+     * DEPOIS de matches para nao deslocar o prefixo. */
+    uint64_t *surv; int nSurv;   /* fatia deste worker (distribuida em jvRunLift) */
+} JvLiftWorker;
+
+static void *jvCompleteWorker(void *arg)
+{
+    JvLiftWorker *w = (JvLiftWorker *)arg;
+    uint64_t hiLo = w->start >> 19;
+    uint64_t hiHi = (w->end - 1) >> 19;
+    int mm[2 * JAVA_MAX_STRUCTURES];
+    for (int s = 0; s < w->nSurv && !*w->stop; s++) {
+        uint64_t lo19 = w->surv[s];
+        for (uint64_t hi = hiLo; hi <= hiHi; hi++) {
+            uint64_t s48 = (hi << 19) | lo19;
+            if (s48 < w->start || s48 >= w->end) continue;
+            int64_t sc = 0;
+            if (javaCheckSeed(w->targets, w->n, s48, mm, &sc)) {
+                jvInsert((JvWorker *)w, s48, sc, mm);
+            }
+            w->checked++;
+            if ((w->checked & 0xFFFFFULL) == 0 && w->deadline > 0.0 &&
+                nowms_s() > w->deadline) { *w->stop = 1; break; }
+        }
+    }
+    return NULL;
+}
+
+/* Estagio 1 (sweep 2^19) + estagio 2 (completacao). 0 ok, -1 OOM. */
+static int jvRunLift(const JavaTarget *targets, int n,
+                     uint64_t start, uint64_t end, int maxResults,
+                     double deadline, int numThreads, JvRun *out)
+{
+    /* Estagio 1: 2^19 low-bit sweep com o teste %4. */
+    int survCount = 0;
+    uint64_t *surv = malloc(((size_t)1 << 19) * sizeof(uint64_t));
+    if (!surv) return -1;
+    for (uint64_t lo19 = 0; lo19 < (1ULL << 19); lo19++)
+        if (jvLiftTest(targets, n, lo19)) surv[survCount++] = lo19;
+    out->checked = 1ULL << 19;
+
+    /* Estagio 2: completacao sobre os sobreviventes, particionada. */
+    int t = numThreads < survCount ? numThreads : (survCount > 0 ? survCount : 1);
+    JvLiftWorker *ws = calloc((size_t)t, sizeof(JvLiftWorker));
+    CrackThread *th = calloc((size_t)t, sizeof(CrackThread));
+    volatile int stop = 0;
+    for (int i = 0; i < t; i++) {
+        ws[i].targets = targets; ws[i].n = n;
+        ws[i].start = start; ws[i].end = end;
+        ws[i].maxResults = maxResults;
+        ws[i].deadline = deadline; ws[i].stop = &stop;
+        ws[i].worst = INT64_MAX; ws[i].worstIdx = -1;
+        ws[i].hits = malloc((size_t)maxResults * sizeof(JavaHit));
+        ws[i].matches = malloc((size_t)maxResults * n * 2 * sizeof(int));
+        if (!ws[i].hits || !ws[i].matches) { free(surv); return -1; }
+        /* distribui sobreviventes round-robin: sobrevivente i -> worker i % t */
+        ws[i].surv = surv; ws[i].nSurv = 0;
+    }
+    for (int i = 0; i < survCount; i++) ws[i % t].nSurv++;
+    /* Distribui para um buffer SEPARADO: escrever in-place em surv[] corrompe a
+     * lista, pois o destino base[wi]+cursor pode exceder a origem i ainda nao
+     * lida (ex.: item 3 -> pos 138, sobrescrevendo o survivor 138). Depois cada
+     * worker aponta para a propria fatia. */
+    uint64_t *slice = malloc((size_t)survCount * sizeof(uint64_t));
+    if (!slice) { free(surv); return -1; }
+    int *cursor = calloc((size_t)t, sizeof(int));
+    int *base = calloc((size_t)t, sizeof(int));
+    int acc = 0;
+    for (int i = 0; i < t; i++) { base[i] = acc; acc += ws[i].nSurv; }
+    for (int i = 0; i < survCount; i++) { int wi = i % t; slice[base[wi] + cursor[wi]++] = surv[i]; }
+    for (int i = 0; i < t; i++) ws[i].surv = slice + base[i];
+    free(cursor); free(base);
+
+    if (t == 1) jvCompleteWorker(&ws[0]);
+    else {
+        for (int i = 0; i < t; i++) th[i] = crackThreadCreate(jvCompleteWorker, &ws[i]);
+        for (int i = 0; i < t; i++) crackThreadJoin(th[i]);
+    }
+    out->timedOut = stop;
+    out->c = 0;
+    out->hits = malloc((size_t)maxResults * sizeof(JavaHit));
+    out->matches = malloc((size_t)maxResults * n * 2 * sizeof(int));
+    if (!out->hits || !out->matches) { free(surv); free(slice); return -1; }
+    for (int i = 0; i < t; i++) {
+        out->checked += ws[i].checked;
+        for (int q = 0; q < ws[i].hitCount; q++) {
+            if (out->c < maxResults) {
+                out->hits[out->c] = ws[i].hits[q];
+                memcpy(out->matches + (size_t)out->c * n * 2,
+                       ws[i].matches + (size_t)q * n * 2, (size_t)n * 2 * sizeof(int));
+                out->c++;
+            } else {
+                int64_t w = INT64_MAX; int wIdx = -1;
+                for (int u = 0; u < out->c; u++)
+                    if (out->hits[u].score < w) { w = out->hits[u].score; wIdx = u; }
+                if (ws[i].hits[q].score >= w) continue;
+                out->hits[wIdx] = ws[i].hits[q];
+                memcpy(out->matches + (size_t)wIdx * n * 2,
+                       ws[i].matches + (size_t)q * n * 2, (size_t)n * 2 * sizeof(int));
+            }
+        }
+        free(ws[i].hits); free(ws[i].matches);
+    }
+    free(ws); free(th); free(surv); free(slice);
+    return 0;
+}
+
 SEEDFINDER_API char *seedfinder_crack_java(
     const int *types, int numTypes,
     const double *xBlocks, const double *zBlocks,
@@ -311,6 +454,11 @@ SEEDFINDER_API char *seedfinder_crack_java(
         return buf;
     }
 
-    /* Task 3 preenche o caminho LIFTING aqui. Por ora: erro acionavel. */
-    return strdup("{\"error\":\"liftable-structure path not implemented yet\"}");
+    JvRun run;
+    if (jvRunLift(targets, n, startSeed, endSeed, maxResults, deadline,
+                  numThreads, &run) != 0)
+        return strdup("{\"error\":\"out of memory\"}");
+    char *buf = jvSerialize(&run, n, numThreads);
+    free(run.hits); free(run.matches);
+    return buf;
 }
