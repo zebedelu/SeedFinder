@@ -120,3 +120,197 @@ int javaCheckSeed(const JavaTarget *targets, int n, uint64_t s48,
     if (scoreOut) *scoreOut = score;
     return 1;
 }
+
+typedef struct { uint64_t seed; int64_t score; } JavaHit;
+
+typedef struct {
+    const JavaTarget *targets; int n;
+    uint64_t start, end;
+    int maxResults;
+    double deadline; volatile int *stop;
+    uint64_t checked;
+    JavaHit *hits; int hitCount; int64_t worst; int worstIdx;
+    int *matches;              /* maxResults * n * 2 ints */
+} JvWorker;
+
+static void jvInsert(JvWorker *w, uint64_t seed, int64_t score, const int *mm)
+{
+    if (w->hitCount < w->maxResults) {
+        w->hits[w->hitCount].seed = seed;
+        w->hits[w->hitCount].score = score;
+        memcpy(w->matches + (size_t)w->hitCount * w->n * 2, mm,
+               (size_t)w->n * 2 * sizeof(int));
+        w->hitCount++;
+        if (score < w->worst) { w->worst = score; w->worstIdx = w->hitCount - 1; }
+        return;
+    }
+    if (score >= w->worst) return;
+    int slot = w->worstIdx;
+    w->hits[slot].seed = seed;
+    w->hits[slot].score = score;
+    memcpy(w->matches + (size_t)slot * w->n * 2, mm, (size_t)w->n * 2 * sizeof(int));
+    w->worst = INT64_MAX; w->worstIdx = -1;
+    for (int i = 0; i < w->hitCount; i++)
+        if (w->hits[i].score < w->worst) { w->worst = w->hits[i].score; w->worstIdx = i; }
+}
+
+static void *jvSweepWorker(void *arg)
+{
+    JvWorker *w = (JvWorker *)arg;
+    int mm[2 * JAVA_MAX_STRUCTURES];
+    for (uint64_t s = w->start; s < w->end && !*w->stop; s++) {
+        int64_t sc = 0;
+        if (javaCheckSeed(w->targets, w->n, s, mm, &sc)) jvInsert(w, s, sc, mm);
+        w->checked++;
+        if ((s & 0xFFFFFULL) == 0 && w->deadline > 0.0 && nowms_s() > w->deadline)
+            { *w->stop = 1; break; }
+    }
+    return NULL;
+}
+
+typedef struct { JavaHit *hits; int *matches; int c; uint64_t checked; int timedOut; } JvRun;
+
+/* Varre [start,end) particionado. 0 ok; OOM -> -1. */
+static int jvRunSweep(const JavaTarget *targets, int n,
+                      uint64_t start, uint64_t end, int maxResults,
+                      double deadline, int numThreads, JvRun *out)
+{
+    JvWorker *ws = calloc((size_t)numThreads, sizeof(JvWorker));
+    CrackThread *th = calloc((size_t)numThreads, sizeof(CrackThread));
+    volatile int stop = 0;
+    uint64_t part = (end - start) / (uint64_t)numThreads;
+    for (int i = 0; i < numThreads; i++) {
+        ws[i].targets = targets; ws[i].n = n;
+        ws[i].start = start + (uint64_t)i * part;
+        ws[i].end = (i == numThreads - 1) ? end : ws[i].start + part;
+        ws[i].maxResults = maxResults;
+        ws[i].deadline = deadline; ws[i].stop = &stop;
+        ws[i].worst = INT64_MAX; ws[i].worstIdx = -1;
+        ws[i].hits = malloc((size_t)maxResults * sizeof(JavaHit));
+        ws[i].matches = malloc((size_t)maxResults * n * 2 * sizeof(int));
+        if (!ws[i].hits || !ws[i].matches) {
+            for (int q = 0; q < numThreads; q++) { free(ws[q].hits); free(ws[q].matches); }
+            free(ws); free(th); return -1;
+        }
+    }
+    if (numThreads == 1) jvSweepWorker(&ws[0]);
+    else {
+        for (int i = 0; i < numThreads; i++) th[i] = crackThreadCreate(jvSweepWorker, &ws[i]);
+        for (int i = 0; i < numThreads; i++) crackThreadJoin(th[i]);
+    }
+    out->timedOut = stop;
+    out->checked = 0;
+    out->c = 0;
+    out->hits = malloc((size_t)maxResults * sizeof(JavaHit));
+    out->matches = malloc((size_t)maxResults * n * 2 * sizeof(int));
+    if (!out->hits || !out->matches) {
+        for (int i = 0; i < numThreads; i++) { free(ws[i].hits); free(ws[i].matches); }
+        free(ws); free(th); return -1;
+    }
+    for (int i = 0; i < numThreads; i++) {
+        out->checked += ws[i].checked;
+        for (int q = 0; q < ws[i].hitCount; q++) {
+            if (out->c < maxResults) {
+                out->hits[out->c] = ws[i].hits[q];
+                memcpy(out->matches + (size_t)out->c * n * 2,
+                       ws[i].matches + (size_t)q * n * 2, (size_t)n * 2 * sizeof(int));
+                out->c++;
+            } else {
+                int64_t w = INT64_MAX; int wIdx = -1;
+                for (int u = 0; u < out->c; u++)
+                    if (out->hits[u].score < w) { w = out->hits[u].score; wIdx = u; }
+                if (ws[i].hits[q].score >= w) continue;
+                out->hits[wIdx] = ws[i].hits[q];
+                memcpy(out->matches + (size_t)wIdx * n * 2,
+                       ws[i].matches + (size_t)q * n * 2, (size_t)n * 2 * sizeof(int));
+            }
+        }
+        free(ws[i].hits); free(ws[i].matches);
+    }
+    free(ws); free(th);
+    return 0;
+}
+
+/* insertion sort asc por score + serializacao (envelope identico ao seedfinder_crack). */
+static char *jvSerialize(JvRun *run, int n, int numThreads)
+{
+    int c = run->c;
+    for (int i = 1; i < c; i++) {
+        JavaHit key = run->hits[i];
+        int krow[2 * JAVA_MAX_STRUCTURES];
+        memcpy(krow, run->matches + (size_t)i * n * 2, (size_t)n * 2 * sizeof(int));
+        int j = i - 1;
+        while (j >= 0 && run->hits[j].score > key.score) {
+            run->hits[j + 1] = run->hits[j];
+            memcpy(run->matches + (size_t)(j + 1) * n * 2,
+                   run->matches + (size_t)j * n * 2, (size_t)n * 2 * sizeof(int));
+            j--;
+        }
+        run->hits[j + 1] = key;
+        memcpy(run->matches + (size_t)(j + 1) * n * 2, krow, (size_t)n * 2 * sizeof(int));
+    }
+    size_t cap = 128 + (size_t)c * ((size_t)n * 26 + 80);
+    char *buf = malloc(cap);
+    int off = sprintf(buf, "{\"results\":[");
+    for (int i = 0; i < c; i++) {
+        off += sprintf(buf + off, "%s{\"seed\":%llu,\"score\":%lld,\"matches\":[",
+                       i ? "," : "", (unsigned long long)run->hits[i].seed,
+                       (long long)run->hits[i].score);
+        const int *mm = run->matches + (size_t)i * n * 2;
+        for (int k = 0; k < n; k++)
+            off += sprintf(buf + off, "%s[%d,%d]", k ? "," : "", mm[k * 2], mm[k * 2 + 1]);
+        off += sprintf(buf + off, "]}");
+    }
+    sprintf(buf + off, "],\"checked\":%llu,\"timed_out\":%s,\"threads\":%d}",
+            (unsigned long long)run->checked, run->timedOut ? "true" : "false", numThreads);
+    return buf;
+}
+
+SEEDFINDER_API char *seedfinder_crack_java(
+    const int *types, int numTypes,
+    const double *xBlocks, const double *zBlocks,
+    int tolerance,
+    uint64_t startSeed, uint64_t endSeed,
+    int maxResults, double timeBudgetSec, int numThreads)
+{
+    JavaTarget targets[JAVA_MAX_STRUCTURES];
+    int n = 0; char *err = NULL;
+    if (javaTargetsBuild(types, numTypes, xBlocks, zBlocks, tolerance, targets, &n, &err))
+        return err;
+    if (maxResults <= 0 || maxResults > 2000)
+        return strdup("{\"error\":\"maxResults must be between 1 and 2000\"}");
+    if (numThreads < 1 || numThreads > 64) numThreads = 8;
+    startSeed &= JAVA_MASK48;
+    if (endSeed > (1ULL << 48)) endSeed = 1ULL << 48;
+    if (startSeed >= endSeed) return strdup("{\"error\":\"empty seed range\"}");
+
+    int allLiftable = (tolerance == 0);
+    for (int i = 0; i < n && allLiftable; i++)
+        if (targets[i].cfg.chunkRange % 4 != 0) allLiftable = 0;
+
+#if defined(__EMSCRIPTEN__)
+    numThreads = 1;
+#endif
+    if ((endSeed - startSeed) < (uint64_t)numThreads) numThreads = 1;
+
+    double deadline = (timeBudgetSec > 0.0) ? nowms_s() + timeBudgetSec * 1000.0 : 0.0;
+
+    if (!allLiftable) {
+        if ((endSeed - startSeed) > (1ULL << 33)) {
+            return strdup("{\"error\":\"48-bit Java sweep infeasible without liftable "
+                          "structures (Igloo/Desert Pyramid/Jungle Temple/Swamp Hut/"
+                          "Outpost/Shipwreck/Ocean Ruin) - narrow start/end, use exact "
+                          "coordinates (tolerance 0), or add liftable structure evidence\"}");
+        }
+        JvRun run;
+        if (jvRunSweep(targets, n, startSeed, endSeed, maxResults, deadline,
+                       numThreads, &run) != 0)
+            return strdup("{\"error\":\"out of memory\"}");
+        char *buf = jvSerialize(&run, n, numThreads);
+        free(run.hits); free(run.matches);
+        return buf;
+    }
+
+    /* Task 3 preenche o caminho LIFTING aqui. Por ora: erro acionavel. */
+    return strdup("{\"error\":\"liftable-structure path not implemented yet\"}");
+}

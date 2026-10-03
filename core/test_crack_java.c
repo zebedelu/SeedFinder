@@ -75,10 +75,48 @@ static int testVerifier(void)
     return 1;
 }
 
+/* Sweep: janela estreita recupera o seed; 32-bit cheio recupera 8675309. */
+static int testSweep(void)
+{
+    int types[] = { Village, Monument, Igloo, Swamp_Hut };
+    Pos p[4][8];
+    double xs[4], zs[4];
+    for (int i = 0; i < 4; i++) {
+        if (genStructures(types[i], FIX1, p[i], 8) < 1) return 0;
+        xs[i] = (double)p[i][0].x; zs[i] = (double)p[i][0].z;
+    }
+    char *r = seedfinder_crack_java(types, 4, xs, zs, 0,
+                                    FIX1 - 2000, FIX1 + 2000, 50, 30.0, 8);
+    if (!r) return 0;
+    int ok = (strstr(r, "\"seed\":8675309") != NULL);
+    free(r);
+    return ok;
+}
+
+/* Guard: varredura > 2^33 sem estruturas liftaveis -> erro acionavel. */
+static int testGuard(void)
+{
+    int types[] = { Village, Monument, Mansion, Ancient_City };
+    Pos p[4][8];
+    double xs[4], zs[4];
+    for (int i = 0; i < 4; i++) {
+        if (genStructures(types[i], FIX1, p[i], 8) < 1) return 0;
+        xs[i] = (double)p[i][0].x; zs[i] = (double)p[i][0].z;
+    }
+    char *r = seedfinder_crack_java(types, 4, xs, zs, 0, 0, 1ULL << 48, 50, 30.0, 8);
+    if (!r) return 0;
+    int ok = (strstr(r, "infeasible") != NULL);
+    free(r);
+    return ok;
+}
+
 int main(void)
 {
     if (!testConvention()) { printf("FAIL convention\n"); return 1; }
     if (!testVerifier())   { printf("FAIL verifier\n");   return 1; }
+    if (!testSweep())      { printf("FAIL sweep\n");      return 1; }
+    if (!testGuard())      { printf("FAIL guard\n");      return 1; }
     printf("OK parity + verifier\n");
+    printf("OK sweep + guard\n");
     return 0;
 }
