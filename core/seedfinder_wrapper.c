@@ -226,6 +226,72 @@ SEEDFINDER_API void seedfinder_free_result(char *result)
     free(result);
 }
 
+/* ---- Mapa de biomas (WASM) ---------------------------------------------- */
+
+/* Grade de biomas do Overworld em MC_NEWEST (biomas idênticos Java/Bedrock;
+ * só as estruturas diferem). Preenche out[0 .. sx*sz) row-major
+ * (out[j*sx + i]); cada célula cobre `scale` blocos a partir de
+ * (x0 + i*scale, z0 + j*scale).
+ *  x0,z0: canto NO em BLOCOS, múltiplos de scale
+ *  scale: 4 | 16 | 64 | 256   y: altura em unidades 1:4 (79 = 319>>2)
+ * Retorna 0 ok, -1 args inválidos, -2 alloc, -3 genBiomes. */
+SEEDFINDER_API int seedfinder_biome_grid(uint64_t seed, int x0, int z0,
+    int sx, int sz, int scale, int y, int *out)
+{
+    if (!out || sx <= 0 || sz <= 0 || sx > 4096 || sz > 4096)
+        return -1;
+    if ((long long) sx * (long long) sz > 4000000)
+        return -1;
+    if (scale != 4 && scale != 16 && scale != 64 && scale != 256)
+        return -1;
+    if (x0 % scale != 0 || z0 % scale != 0) /* divisão exata também p/ negativos */
+        return -1;
+
+    Generator g;
+    setupGenerator(&g, MC_NEWEST, 0);
+    applySeed(&g, DIM_OVERWORLD, seed);
+
+    Range r = { scale, x0 / scale, z0 / scale, sx, sz, y, 1 };
+    int *cache = allocCache(&g, r);
+    if (!cache)
+        return -2;
+    int rc = genBiomes(&g, cache, r);
+    if (rc == 0)
+        memcpy(out, cache, (size_t) sx * (size_t) sz * sizeof(int));
+    free(cache);
+    return rc == 0 ? 0 : -3;
+}
+
+/* Paleta de biomas: cores do initBiomeColors (AMIDST) + nomes do biome2str.
+ * JSON {"colors":["#rrggbb", x256],"names":{"0":"ocean",...}} — ponteiro
+ * malloc'd, liberar com seedfinder_free_result (NULL em OOM).
+ * Cap aritmético (house style): 256*(#rrggbb,) + 256*(123:"nome",) + envelope. */
+SEEDFINDER_API char *seedfinder_biome_palette(void)
+{
+    unsigned char colors[256][3];
+    initBiomeColors(colors);
+    size_t cap = 64 + 256 * 10 + 256 * 48;
+    char *buf = (char *) malloc(cap);
+    if (!buf)
+        return NULL;
+    char *p = buf;
+    p += sprintf(p, "{\"colors\":[");
+    for (int i = 0; i < 256; i++)
+        p += sprintf(p, "%s\"#%02x%02x%02x\"", i ? "," : "",
+                     colors[i][0], colors[i][1], colors[i][2]);
+    p += sprintf(p, "],\"names\":{");
+    int first = 1;
+    for (int id = 0; id < 256; id++) {
+        const char *nm = biome2str(MC_NEWEST, id);
+        if (!nm)
+            continue;
+        p += sprintf(p, "%s\"%d\":\"%s\"", first ? "" : ",", id, nm);
+        first = 0;
+    }
+    sprintf(p, "}}");
+    return buf;
+}
+
 /* ============================ SeedCracker ============================ */
 
 #include "platform_threads.h"
