@@ -2,7 +2,7 @@
 -- SeedFinder — Minecraft Bedrock Structure Finder
 -- Uses network.getAsync() to call the SeedFinder API. Works with either the
 -- local Flask server (127.0.0.1:7890) or the hosted API at
--- mineseedfinder.vercel.app. Leave the Server URL field empty to use the
+-- www.mineseedfinder.com. Leave the Server URL field empty to use the
 -- hosted server.
 -- ============================================================================
 
@@ -15,7 +15,7 @@ version = "1.4.1"
 -- Section 1: HTTP Bridge Integration
 -- ============================================================================
 
-local HOSTED_URL = "https://mineseedfinder.vercel.app"
+local HOSTED_URL = "https://www.mineseedfinder.com"
 local SERVER_URL = HOSTED_URL
 local serverOnline = false
 local serverWarned = false
@@ -269,7 +269,7 @@ end
 local seedTextBox = settings.addTextBox("Seed", "Enter your world seed (numbers only)", "1", 30)
 local radiusSlider = settings.addSlider("Radius", "How far to search (chunks)", 10, 200, 1)
 local maxResultsSlider = settings.addSlider("Max Results", "Maximum structures to display", 15, 50, 1)
-local serverUrlTextBox = settings.addTextBox("Server URL", "Leave empty to connect to the hosted server (mineseedfinder.vercel.app)", "", 40)
+local serverUrlTextBox = settings.addTextBox("Server URL", "Leave empty to connect to the hosted server (www.mineseedfinder.com)", "", 40)
 local rescanKey = settings.addKeybind("Rescan", "Press to clear and rescan structures")
 local notifyToggle = settings.addToggle("Scan Notification", "Show a notification when scan completes", true)
 
@@ -508,7 +508,7 @@ local function onRender()
 	ImGui.Text("Server: " .. SERVER_URL)
 	ImGui.Text("Leave the Server URL field empty to connect to the hosted server!")
 	ImGui.Text("Max 60 requests per minute.")
-	ImGui.Text("Check mineseedfinder.vercel.app for possible updates! 😊")
+	ImGui.Text("Check www.mineseedfinder.com for possible updates! 😊")
 	ImGui.Text("If you really like this project, give a star on our GitHub!")
 	ImGui.Text("https://github.com/zebedelu/SeedFinder")
 	if scriptUpdate then

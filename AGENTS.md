@@ -8,7 +8,7 @@ SeedFinder is a Minecraft Bedrock Edition **and Java Edition (latest)** structur
 
 `README.md` is the user-facing reference: full API docs (params, response shapes), the supported-structures list, and real benchmark tables (v1.0.0 and v1.2.0). Point users there for API questions instead of re-deriving from code.
 
-This repository is responsible for compiling the native libraries (`.dll` and `.so`). The `.so` is consumed by an external repository called **`mineseedfinder`**, deployed on Vercel (`https://mineseedfinder.vercel.app`) to distribute the product for free. It exposes a `/scan` endpoint so the seedfinder can be tested; SeedCracker is available **only via WASM**, since running it as a server API would be too expensive on the Vercel runtime. The site's `/scan` console **runs the same WASM module** (scan export, added 2026-09-25), so each Scan costs the Vercel serverless nothing — the HTTP route stays for API consumers (see "WASM (browser build)").
+This repository is responsible for compiling the native libraries (`.dll` and `.so`). The `.so` is consumed by an external repository called **`mineseedfinder`**, deployed on Vercel (`https://www.mineseedfinder.com`) to distribute the product for free. It exposes a `/scan` endpoint so the seedfinder can be tested; SeedCracker is available **only via WASM**, since running it as a server API would be too expensive on the Vercel runtime. The site's `/scan` console **runs the same WASM module** (scan export, added 2026-09-25), so each Scan costs the Vercel serverless nothing — the HTTP route stays for API consumers (see "WASM (browser build)").
 
 ## Architecture
 
@@ -20,7 +20,7 @@ Flarial Lua Script  ──HTTP──>  Flask API (127.0.0.1:7890)  ──ctypes�
 
 There is a **single Flarial Lua module** in `script/`:
 
-- `script/SeedFinder.lua` — points at `https://mineseedfinder.vercel.app` (hosted API) when the **Server URL** field is left empty, or at whatever URL the user types (e.g. the local `http://127.0.0.1:7890` server, the packaged Windows path with `SeedFinder.exe`).
+- `script/SeedFinder.lua` — points at `https://www.mineseedfinder.com` (hosted API) when the **Server URL** field is left empty, or at whatever URL the user types (e.g. the local `http://127.0.0.1:7890` server, the packaged Windows path with `SeedFinder.exe`).
 
 1. **C core** (`core/`) — Structure-finding engine. Two parallel implementations:
    - `core/seedfinder_wrapper.c` — plain C entry point. Exports `seedfinder_scan` (Bedrock, unchanged ABI), `seedfinder_scan_java` (Java; extra `const char *mcLabel` arg, always `NULL` today — the future hook for a game-version param, resolved via cubiomes' `str2mc`), plus `seedfinder_free_result`, `seedfinder_status`. Both scans share one internal loop, `scan_impl(..., edition, mcLabel)` (in `core/seedfinder_wrapper.c`), with 4 edition dispatch points: `setupGenerator` mc, structure config, placer (`getBedrockStructurePos` vs `getStructurePos`), biome gate (`structureIsViable` vs `isViableStructurePos`). This is what the Python server loads. It also holds the entire **SeedCracker** engine (`seedfinder_crack`) — see "SeedCracker" below.

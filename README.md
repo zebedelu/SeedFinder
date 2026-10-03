@@ -57,7 +57,7 @@ Target platform is Minecraft Bedrock Edition (1.18 through the latest release) a
 - **Native scan engine.** The actual search runs in compiled C against cubiomes, not Lua or Python, so it stays fast even at large radii - see [Benchmarks](#benchmarks) for real numbers.
 - **Plain REST API.** Three scan endpoints - `/scan`, `/scan/java`, `/scan/bedrock` - each accepting **GET** (query string) and **POST** (JSON body, same keys). No SDK, no auth.
 - **Bedrock and Java in one API.** The same 17 structure types are predicted for both editions; `/scan` picks the edition with `mc=java`/`bedrock` (default `bedrock`), or use the fixed `/scan/java` / `/scan/bedrock` paths. Java always targets the latest release.
-- **Official site.** The app is live at `https://mineseedfinder.vercel.app` - a free hosted instance you can call without building or running anything yourself.
+- **Official site.** The app is live at `https://www.mineseedfinder.com` - a free hosted instance you can call without building or running anything yourself.
 - **In-game overlay for Flarial Client**, results sorted by distance, rendered with ImGui.
 - **17 working structure types** - villages, temples, ocean structures, ancient cities, mansions, portals, and more. Full list [below](#supported-structures).
 - **Multi-type queries** - ask for several structures in one request (`types=5,8,9`) instead of one call per type.
@@ -70,7 +70,7 @@ Target platform is Minecraft Bedrock Edition (1.18 through the latest release) a
 No install, no local server - this hits the hosted API directly:
 
 ```bash
-curl "https://mineseedfinder.vercel.app/scan?seed=1234567890&x=0&z=0&radius=100&max=20&types=5"
+curl "https://www.mineseedfinder.com/scan?seed=1234567890&x=0&z=0&radius=100&max=20&types=5"
 ```
 
 ```json
@@ -104,7 +104,7 @@ SeedFinder.exe --port 8080 --host 0.0.0.0
 ```python
 import requests
 
-BASE = "https://mineseedfinder.vercel.app"
+BASE = "https://www.mineseedfinder.com"
 
 def scan(seed, x=0, z=0, radius=100, max_=20, types="5"):
     params = {"seed": seed, "x": x, "z": z, "radius": radius, "max": max_, "types": types}
@@ -118,7 +118,7 @@ for s in scan(seed=31415, radius=100, max_=50, types="5,8,9")["results"]:
 
 ```javascript
 // Node 18+, no dependencies
-const BASE = "https://mineseedfinder.vercel.app";
+const BASE = "https://www.mineseedfinder.com";
 
 async function scan(seed, x = 0, z = 0, radius = 100, max = 20, types = "5") {
   const url = new URL("/scan", BASE);
@@ -131,7 +131,7 @@ async function scan(seed, x = 0, z = 0, radius = 100, max = 20, types = "5") {
 
 ```lua
 -- Inside a Flarial Client module; `network` is a Flarial global
-local BASE = "http://127.0.0.1:7890" -- or https://mineseedfinder.vercel.app
+local BASE = "http://127.0.0.1:7890" -- or https://www.mineseedfinder.com
 local function scan(seed, x, z, radius, maxResults, types)
   local url = string.format("%s/scan?seed=%d&x=%d&z=%d&radius=%d&max=%d&types=%s",
     BASE, seed, x, z, radius, maxResults, types)
@@ -150,13 +150,13 @@ Flarial Lua Script  --HTTP-->  Flask server  --ctypes-->  seedfinder_lib (.so / 
 
 1. **C core** (`core/`) - `seedfinder_wrapper.c` links cubiomes statically and implements the shared scan loop (`scan_impl`) behind two exports: `seedfinder_scan()` (Bedrock) and `seedfinder_scan_java()` (Java). For each requested structure type it walks the relevant grid regions around the player within `radius`, checks biome viability, computes distance, sorts, caps at `max`, and returns a hand-built JSON string across the ABI boundary (freed afterward with `seedfinder_free_result`). A flag switches the placer - Bedrock's `getBedrockStructurePos` vs cubiomes' Java `getStructurePos` - and the matching biome gate: Bedrock checks the structure's own cell (`bedrockViableBiome` in `core/viability.c`), Java uses cubiomes' native `isViableStructurePos`.
 2. **HTTP server** (`server/`) - a single Flask app package (`server/app/`) loads that shared library and exposes `/status` plus the three scan routes `/scan`, `/scan/java` and `/scan/bedrock` (GET and POST on each). One codebase serves every deployment: `server/index.py` is the WSGI entry, the same file runs locally on Windows and Linux via `server/start.bat` / `server/start.sh`, and it's what gets frozen into `SeedFinder.exe` by `server/build_exe.py`.
-3. **Flarial script** (`script/SeedFinder.lua`) - polls `/status`, calls `/scan` with the player's live coordinates, and draws the results in an ImGui panel with a name-to-icon lookup. Leaving the Server URL field empty connects to the hosted API (https://mineseedfinder.vercel.app); entering a URL (e.g. the local `127.0.0.1:7890`) overrides it.
+3. **Flarial script** (`script/SeedFinder.lua`) - polls `/status`, calls `/scan` with the player's live coordinates, and draws the results in an ImGui panel with a name-to-icon lookup. Leaving the Server URL field empty connects to the hosted API (https://www.mineseedfinder.com); entering a URL (e.g. the local `127.0.0.1:7890`) overrides it.
 
 There's also an experimental fourth path in `core/SeedFinderBridge.cpp` / `.h`: a direct Lua↔C bridge meant to be compiled straight into the Flarial Client DLL, cutting out the HTTP hop entirely. It's set up in `CMakeLists.txt` but the shipped Lua script doesn't use it yet - see [Roadmap](#roadmap).
 
 ## SeedCracker (Bedrock seed search by structure layout)
 
-SeedFinder walks seed → structures. [SeedCracker](https://mineseedfinder.vercel.app/seedcracker) goes the other way: you describe the layout you want - which structures at which coordinates - and it returns the Bedrock seeds that generate them.
+SeedFinder walks seed → structures. [SeedCracker](https://www.mineseedfinder.com/seedcracker) goes the other way: you describe the layout you want - which structures at which coordinates - and it returns the Bedrock seeds that generate them.
 
 It sweeps the 32-bit Bedrock seed space in parallel inside the native library (one thread per CPU core, capped at 64), bounded by a time budget — so an answer always comes back, even if the full sweep would take minutes. The more structures you list and the tighter the `tolerance`, the fewer seeds pass.
 
@@ -175,7 +175,7 @@ curl -X POST http://127.0.0.1:7890/seedcracker \
 
 The response is always a JSON list: a header item with `status` (`ok`, `partial` when the time budget ran out, `error`, or `unavailable`), then one item per probable seed with `seed`, `score` (sum of squared chunk deviations across structures — lower is better) and the matched structure chunk coordinates.
 
-SeedCracker runs on the **local API only** (`http://127.0.0.1:7890`, started with `server\start.bat` or `server/start.sh`). The hosted instance disables the route because the computation is too expensive to keep running for free; it answers with an `"unavailable"` list and a download link. Payload options: `tolerance` (0–8 chunks, default 6), `units` (`blocks` or `chunks`), `start`/`end` (seed range), `max` (default 500, cap 2000), `max_seconds` (default 30, 1–120). Full docs: [SeedCracker documentation](https://mineseedfinder.vercel.app/seedcracker/documentation).
+SeedCracker runs on the **local API only** (`http://127.0.0.1:7890`, started with `server\start.bat` or `server/start.sh`). The hosted instance disables the route because the computation is too expensive to keep running for free; it answers with an `"unavailable"` list and a download link. Payload options: `tolerance` (0–8 chunks, default 6), `units` (`blocks` or `chunks`), `start`/`end` (seed range), `max` (default 500, cap 2000), `max_seconds` (default 30, 1–120). Full docs: [SeedCracker documentation](https://www.mineseedfinder.com/seedcracker/documentation).
 
 ### SeedCracker 64-bit mode
 
@@ -248,13 +248,13 @@ body with the same keys - no query-string fallback on POST):
 
 ```bash
 # GET, Bedrock (default)
-curl "https://mineseedfinder.vercel.app/scan?seed=31415&x=0&z=0&radius=100&max=50&types=5,8,9"
+curl "https://www.mineseedfinder.com/scan?seed=31415&x=0&z=0&radius=100&max=50&types=5,8,9"
 
 # GET, Java
-curl "https://mineseedfinder.vercel.app/scan/java?seed=31415&x=0&z=0&radius=100&max=50&types=5,8,9"
+curl "https://www.mineseedfinder.com/scan/java?seed=31415&x=0&z=0&radius=100&max=50&types=5,8,9"
 
 # POST, Java (JSON body, same keys)
-curl -X POST "https://mineseedfinder.vercel.app/scan" \
+curl -X POST "https://www.mineseedfinder.com/scan" \
   -H "Content-Type: application/json" \
   -d '{"seed": 31415, "x": 0, "z": 0, "radius": 100, "max": 50, "types": "5,8,9", "mc": "java"}'
 ```
@@ -304,7 +304,7 @@ The local API also exposes the SeedCracker structure-layout search (Bedrock). Pa
 | `max` | int | `500` | Max results kept (best by score). |
 | `max_seconds` | float | `30` | Time budget; partial results when it expires. |
 
-Response is a JSON list — header then `{"seed", "score", "matches"}` per candidate. Only the local API serves it; the hosted site returns `"unavailable"`. See [SeedCracker (Bedrock seed search by structure layout)](#seedcracker-bedrock-seed-search-by-structure-layout) and [SeedCracker documentation](https://mineseedfinder.vercel.app/seedcracker/documentation).
+Response is a JSON list — header then `{"seed", "score", "matches"}` per candidate. Only the local API serves it; the hosted site returns `"unavailable"`. See [SeedCracker (Bedrock seed search by structure layout)](#seedcracker-bedrock-seed-search-by-structure-layout) and [SeedCracker documentation](https://www.mineseedfinder.com/seedcracker/documentation).
 
 ## Supported structures
 
