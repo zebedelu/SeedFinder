@@ -75,6 +75,10 @@ def _bind(handle) -> None:
     if hasattr(handle, "seedfinder_crack64_shim"):
         handle.seedfinder_crack64_shim.argtypes = _CRACK64_ARGTYPES
         handle.seedfinder_crack64_shim.restype = ctypes.c_void_p
+    # Java cracker: mesma assinatura do seedfinder_crack (argtypes reutilizados).
+    if hasattr(handle, "seedfinder_crack_java"):
+        handle.seedfinder_crack_java.argtypes = _CRACK_ARGTYPES
+        handle.seedfinder_crack_java.restype = ctypes.c_void_p
     # Lib predating Java scan support is valid - bind only when present,
     # same degrade rule as seedfinder_crack.
     if hasattr(handle, "seedfinder_scan_java"):

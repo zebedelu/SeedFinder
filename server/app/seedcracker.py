@@ -19,6 +19,22 @@ from . import native
 
 seedcracker_bp = Blueprint("seedcracker", __name__)
 
+
+def _edition(source, fixed):
+    """fixed path wins; on /seedcracker the first letter of `mc` decides
+    (j->java, b->bedrock, default bedrock) - same rule as api.py /scan."""
+    if fixed is not None:
+        return fixed
+    raw = source.get("mc", "")
+    if raw is None or raw == "":
+        return "bedrock"
+    first = str(raw)[0].lower()
+    if first == "j":
+        return "java"
+    if first == "b":
+        return "bedrock"
+    raise ValueError(f"invalid value for 'mc': {raw!r} (must start with 'j' or 'b')")
+
 MIN_STRUCTURES = 4
 MAX_STRUCTURES = 24
 MAX_TOLERANCE = 8
@@ -80,23 +96,31 @@ def _validate_structures(items, min_count, max_count, allowed, overrides,
     return out
 
 
-def _is_mode64(head):
-    """Explicit mode key, or an 'end' beyond the 32-bit space (JSON only)."""
+def _is_mode64(head, edition="bedrock"):
+    """Explicit mode key, or an 'end' beyond the 32-bit space (JSON only).
+
+    For Java the end is a 48-bit window, so 'end' > 2^32 is NOT 64-bit mode
+    (that auto-detect exists for Bedrock clients); only an explicit
+    "mode": "64" means 64-bit there (rejected in _parse as Bedrock-only).
+    """
     mode = head.get("mode", "32")
     if str(mode) == "64":
         return True
     if str(mode) not in ("32", "None"):
         raise ValueError("mode must be '32' or '64'")
+    if edition == "java":
+        return False
     end = head.get("end")
     if isinstance(end, (int, float)) and int(end) > (1 << 32):
         return True
     return False
 
 
-def _parse(post_data, args):
+def _parse(post_data, args, edition):
     """Returns (mode64, tolerance, units, structures, java_structures, opts).
 
     Raises ValueError. 64-bit mode is POST-JSON only; GET stays 32-bit.
+    Java rejects 64-bit mode outright (Bedrock-only engine).
     """
     java_structures = []
     opts = {}
@@ -125,7 +149,7 @@ def _parse(post_data, args):
         if not raw or not isinstance(raw[0], dict):
             raise ValueError("expected an options object as the first list item")
         head, tail = raw[0], raw[1:]
-        mode64 = _is_mode64(head)
+        mode64 = _is_mode64(head, edition)
         tolerance = int(head.get("tolerance", 6))
         units = head.get("units", "blocks")
         for k in ("start", "end", "max", "max_seconds"):
@@ -139,7 +163,7 @@ def _parse(post_data, args):
         else:
             structures = list(tail)
     elif isinstance(raw, dict):
-        mode64 = _is_mode64(raw)
+        mode64 = _is_mode64(raw, edition)
         tolerance = int(raw.get("tolerance", 6))
         units = raw.get("units", "blocks")
         for k in ("start", "end", "max", "max_seconds"):
@@ -152,6 +176,9 @@ def _parse(post_data, args):
             structures = raw.get("structures", [])
     else:
         raise ValueError("payload must be a JSON list or object")
+
+    if edition == "java" and mode64:
+        raise ValueError("64-bit mode is Bedrock-only")
 
     if not (0 <= tolerance <= MAX_TOLERANCE):
         raise ValueError(f"tolerance must be between 0 and {MAX_TOLERANCE} chunks")
@@ -261,12 +288,66 @@ def _run64(structures, java_structures, tolerance, units, opts):
     return [head] + results
 
 
+def _run_java(structures, tolerance, units, opts):
+    t0 = time.monotonic()
+    n = len(structures)
+    types = (ctypes.c_int * n)(*(s["type"] for s in structures))
+    xs = (ctypes.c_double * n)(*(float(s["x"]) for s in structures))
+    zs = (ctypes.c_double * n)(*(float(s["z"]) for s in structures))
+    start = int(opts.get("start", 0)) & 0xFFFFFFFFFFFF
+    end = min(int(opts.get("end", 1 << 48)), 1 << 48)
+    max_results = min(int(opts.get("max", 500)), MAX_RESULTS_CAP)
+    budget = float(opts.get("max_seconds", DEFAULT_MAX_SECONDS))
+    budget = max(1.0, min(budget, MAX_MAX_SECONDS))
+    threads = max(1, min(os.cpu_count() or 4, 64))
+    ptr = native.lib.seedfinder_crack_java(
+        types, n, xs, zs, tolerance, start, end, max_results, budget, threads)
+    if not ptr:
+        raise RuntimeError("seedfinder_crack_java returned NULL")
+    try:
+        data = json.loads(ctypes.string_at(ptr).decode("utf-8"))
+    finally:
+        native.lib.seedfinder_free_result(ptr)
+    if "error" in data:
+        return [{"status": "error", "message": data["error"]}]
+    timed_out = bool(data.get("timed_out"))
+    elapsed = int((time.monotonic() - t0) * 1000)
+    head = {
+        "status": "partial" if timed_out else "ok",
+        "message": ("search stopped by time budget - results are partial"
+                    if timed_out else "crack completed"),
+        "structures": n, "tolerance": tolerance, "units": units,
+        "bits": 48, "edition": "java",
+        "checked": data.get("checked", 0), "elapsed_ms": elapsed,
+        "timed_out": timed_out,
+    }
+    return [head] + data.get("results", [])
+
+
 @seedcracker_bp.route("/seedcracker", methods=["GET", "POST"])
 def seedcracker():
+    return _seedcracker(None)
+
+
+@seedcracker_bp.route("/seedcracker/java", methods=["GET", "POST"])
+def seedcracker_java():
+    return _seedcracker("java")
+
+
+@seedcracker_bp.route("/seedcracker/bedrock", methods=["GET", "POST"])
+def seedcracker_bedrock():
+    return _seedcracker("bedrock")
+
+
+def _seedcracker(fixed):
     try:
         post_data = request.get_json(silent=True) if request.method == "POST" else None
+        source = post_data if isinstance(post_data, dict) else request.args
+        if isinstance(post_data, list) and post_data and isinstance(post_data[0], dict):
+            source = post_data[0]
+        edition = _edition(source, fixed)
         (mode64, tolerance, units, structures, java_structures,
-         opts) = _parse(post_data, request.args)
+         opts) = _parse(post_data, request.args, edition)
     except ValueError as e:
         return jsonify([{"status": "error", "message": str(e)}]), 400
     except Exception as e:  # noqa: BLE001 - keep the envelope stable
@@ -275,14 +356,22 @@ def seedcracker():
         return jsonify([{"status": "error",
                          "message": "SeedCracker native library (.dll/.so) "
                                     "not loaded on this server."}]), 503
+    if edition == "java":
+        if not hasattr(native.lib, "seedfinder_crack_java"):
+            return jsonify([{"status": "error",
+                             "message": "Java crack requires a rebuilt native "
+                                        "library (seedfinder_crack_java missing)."}]), 503
+        try:
+            return jsonify(_run_java(structures, tolerance, units, opts))
+        except Exception as e:  # noqa: BLE001
+            return jsonify([{"status": "error", "message": f"crack failed: {e}"}]), 500
     if mode64 and not hasattr(native.lib, "seedfinder_crack64_shim"):
         return jsonify([{"status": "error",
                          "message": "64-bit crack requires a rebuilt native "
                                     "library (seedfinder_crack64 missing)."}]), 503
     try:
         if mode64:
-            return jsonify(_run64(structures, java_structures, tolerance,
-                                  units, opts))
+            return jsonify(_run64(structures, java_structures, tolerance, units, opts))
         return jsonify(_run(structures, tolerance, units, opts))
     except Exception as e:  # noqa: BLE001
         return jsonify([{"status": "error", "message": f"crack failed: {e}"}]), 500
