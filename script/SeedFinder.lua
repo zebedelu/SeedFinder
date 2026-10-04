@@ -342,7 +342,7 @@ local function fireScanRequest()
 	local typesStr = table.concat(typeIds, ",")
 	local seedStr = string.format("%.0f", currentSeed)
 	local scanUrl = string.format(
-		"%s/scan?seed=%s&x=%.1f&z=%.1f&radius=%d&max=%d&types=%s",
+		"%s/scan?seed=%s&x=%.1f&z=%.1f&radius=%d&max=%d&types=%s&platform=flarial",
 		SERVER_URL,
 		seedStr,
 		lastPlayerX,
