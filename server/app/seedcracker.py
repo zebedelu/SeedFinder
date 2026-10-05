@@ -46,6 +46,8 @@ MAX_MAX_SECONDS = 120.0
 # acima do teto do modo 32-bit. ponytail: teto unico e' o gate do Vercel/runtime;
 # apertar por-usuario se virar abuso.
 MAX_MAX_SECONDS_64 = 2400.0
+# O full-range Java (Stage A = 2^32) leva minutos; mesmo teto do modo 64.
+MAX_MAX_SECONDS_JAVA = 2400.0
 
 STRUCTURE_NAMES = {
     1: "Desert Pyramid", 2: "Jungle Temple", 3: "Swamp Hut", 4: "Igloo",
@@ -298,7 +300,7 @@ def _run_java(structures, tolerance, units, opts):
     end = min(int(opts.get("end", 1 << 48)), 1 << 48)
     max_results = min(int(opts.get("max", 500)), MAX_RESULTS_CAP)
     budget = float(opts.get("max_seconds", DEFAULT_MAX_SECONDS))
-    budget = max(1.0, min(budget, MAX_MAX_SECONDS))
+    budget = max(1.0, min(budget, MAX_MAX_SECONDS_JAVA))
     threads = max(1, min(os.cpu_count() or 4, 64))
     ptr = native.lib.seedfinder_crack_java(
         types, n, xs, zs, tolerance, start, end, max_results, budget, threads)
