@@ -31,12 +31,15 @@ static int genStructures(int st, uint64_t seed, Pos *out, int max)
 }
 
 /* Especifica as coordenadas aproximadas: adiciona um desvio em blocos dentro
- * de tolerance (simula jogador lendo Chunkbase de forma aproximada). */
+ * de tolerance (simula jogador lendo Chunkbase de forma aproximada).
+ * So o eixo X e' desviado: desviar X e Z juntos daria d2 = 2*d^2, que excede
+ * maxD2 = tolerance^2 quando d = 1 (o seed verdadeiro deixaria de passar o
+ * jvHitLo32 e o sweep 2^32 retornaria vazio). */
 static void jitterPos(double *xs, double *zs, int i, int tol)
 {
     int d = (tol > 0) ? (i % tol) : 0;        /* 0..tol-1, deterministico */
     xs[i] += (double)(d * 16);
-    zs[i] += (double)(d * 16);
+    (void)zs;
 }
 
 /* FULL-RANGE com estruturas grandes + tolerance 1: o caminho SWEEP seria

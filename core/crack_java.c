@@ -409,6 +409,189 @@ static int jvRunLift(const JavaTarget *targets, int n,
     return 0;
 }
 
+/* =========================================================================
+ * LIFTING tolerante (espelho do auto-mode/crack64). Usado quando o SWEEP e'
+ * inviavel (span > 2^33) e o caminho lo19 (%4) nao se aplica (tolerance > 0
+ * ou tipo nao-liftavel). Stage A = sweep lo32 com placement Java + tolerance
+ * na semente representativa; Stage B = lift dos hi16 por sobrevivente.
+ * ========================================================================= */
+
+#define JV_TOL_SAMPLE   (1ULL << 22)   /* amostra do pre-check (~1 s) */
+#define JV_TOL_MAXSURV  (1 << 20)      /* teto de sobreviventes preditos */
+#define JV_TOL_MAXB     (1 << 28)      /* teto de verificacoes do Stage B */
+
+/* Stage A: 1 se a semente representativa sRep = (hiBase<<32)|lo32 coloca TODAS
+ * as estruturas dentro de maxD2 (cada uma em alguma regiao candidata).
+ * hiBase = primeiro hi16 da janela; 0 no full-range => exato p/ seeds < 2^32.
+ * order = poucas-regioes-primeiro (jvOrder), computado UMA vez por run. */
+static int jvHitLo32(const JavaTarget *targets, const int *order, int n,
+                     uint64_t lo32, uint64_t hiBase)
+{
+    uint64_t sRep = (hiBase << 32) | lo32;
+    for (int k = 0; k < n; k++) {
+        const JavaTarget *t = &targets[order[k]];
+        int ok = 0;
+        for (int r = 0; r < t->numRegions && !ok; r++) {
+            Pos pos;
+            if (!getStructurePos(t->type, MC_NEWEST, sRep, t->regX[r], t->regZ[r], &pos))
+                continue;
+            long long dx = (long long)(pos.x >> 4) - t->chunkX;
+            long long dz = (long long)(pos.z >> 4) - t->chunkZ;
+            if (dx * dx + dz * dz <= (long long)t->maxD2) ok = 1;
+        }
+        if (!ok) return 0;
+    }
+    return 1;
+}
+
+/* Worker intercalado: o prefixo replica EXATAMENTE o JvWorker (jvInsert e'
+ * layout-dependente — mesmo padrao do JvLiftWorker); os extras (order, loStart,
+ * loEnd, hiLo, hiHi, hiBase) ficam DEPOIS de matches para nao deslocar o
+ * prefixo. A definicao completa vem ANTES de jvRunTolLift (que usa sizeof). */
+typedef struct JvTolWorker {
+    const JavaTarget *targets; int n;
+    uint64_t start, end;
+    int maxResults;
+    double deadline; volatile int *stop;
+    uint64_t checked;
+    JavaHit *hits; int hitCount; int64_t worst; int worstIdx;
+    int *matches;
+    const int *order;
+    uint64_t loStart, loEnd;
+    uint64_t hiLo, hiHi, hiBase;
+} JvTolWorker;
+
+static void *jvTolWorkerRun(void *arg)
+{
+    JvTolWorker *w = (JvTolWorker *)arg;
+    int mm[2 * JAVA_MAX_STRUCTURES];
+    for (uint64_t lo = w->loStart; lo < w->loEnd && !*w->stop; lo++) {
+        if (jvHitLo32(w->targets, w->order, w->n, lo, w->hiBase)) {
+            for (uint64_t hi = w->hiLo; hi <= w->hiHi && !*w->stop; hi++) {
+                uint64_t s48 = (hi << 32) | lo;
+                if (s48 < w->start || s48 >= w->end) continue;
+                int64_t sc = 0;
+                if (javaCheckSeed(w->targets, w->n, s48, mm, &sc))
+                    jvInsert((JvWorker *)w, s48, sc, mm);
+                w->checked++;
+                if ((w->checked & 0xFFFFFULL) == 0 && w->deadline > 0.0 &&
+                    nowms_s() > w->deadline) { *w->stop = 1; break; }
+            }
+        }
+        w->checked++;
+        if ((lo & 0xFFFFFULL) == 0 && w->deadline > 0.0 && nowms_s() > w->deadline)
+            { *w->stop = 1; break; }
+    }
+    return NULL;
+}
+
+/* Stage A + B INTERCALADOS por worker (sem materializar sobreviventes —
+ * ponytail): ao achar um lo32 que passa jvHitLo32, completa imediatamente os
+ * hi16 da janela com javaCheckSeed. 0 ok / 1 erro acionavel (*err) / -1 OOM. */
+static int jvRunTolLift(const JavaTarget *targets, int n,
+                        uint64_t start, uint64_t end, int maxResults,
+                        double deadline, int numThreads, char **err)
+{
+    uint64_t hiLo = start >> 32;
+    uint64_t hiHi = (end - 1) >> 32;
+    uint64_t hiBase = hiLo;
+    uint64_t hiCount = hiHi - hiLo + 1;
+
+    int order[JAVA_MAX_STRUCTURES];
+    jvOrder(targets, n, order);
+
+    /* Pre-check amostral (mesmo padrao do crack64 full-range): varre 2^22
+     * lo32 e extrapola os sobreviventes x1024. Rejeita antes do sweep 2^32. */
+    {
+        uint64_t s = 0;
+        for (uint64_t lo = 0; lo < JV_TOL_SAMPLE; lo++)
+            if (jvHitLo32(targets, order, n, lo, hiBase)) s++;
+        uint64_t pred = s * (0x100000000ULL / JV_TOL_SAMPLE);
+        if (pred > (uint64_t)JV_TOL_MAXSURV || pred * hiCount > (uint64_t)JV_TOL_MAXB) {
+            char msg[288];
+            snprintf(msg, sizeof msg,
+                     "{\"error\":\"tolerant Java lift infeasible: ~%llu lo32 "
+                     "survivors (%llu in 2^22 sample) x %llu high-bit lifts "
+                     "(est. %llu verifications > %d) - add more structures, "
+                     "lower tolerance, or narrow start/end\"}",
+                     (unsigned long long)pred, (unsigned long long)s,
+                     (unsigned long long)hiCount,
+                     (unsigned long long)(pred * hiCount), JV_TOL_MAXB);
+            *err = strdup(msg);
+            return 1;
+        }
+    }
+
+    int t = numThreads;
+    JvTolWorker *ws = calloc((size_t)t, sizeof(JvTolWorker));
+    CrackThread *th = calloc((size_t)t, sizeof(CrackThread));
+    volatile int stop = 0;
+    uint64_t part = (1ULL << 32) / (uint64_t)t;
+    for (int i = 0; i < t; i++) {
+        ws[i].targets = targets; ws[i].n = n;
+        ws[i].start = start; ws[i].end = end;
+        ws[i].maxResults = maxResults;
+        ws[i].deadline = deadline; ws[i].stop = &stop;
+        ws[i].worst = INT64_MAX; ws[i].worstIdx = -1;
+        ws[i].hits = malloc((size_t)maxResults * sizeof(JavaHit));
+        ws[i].matches = malloc((size_t)maxResults * n * 2 * sizeof(int));
+        ws[i].order = order;
+        ws[i].loStart = (uint64_t)i * part;
+        ws[i].loEnd = (i == t - 1) ? (1ULL << 32) : (uint64_t)(i + 1) * part;
+        ws[i].hiLo = hiLo; ws[i].hiHi = hiHi; ws[i].hiBase = hiBase;
+        if (!ws[i].hits || !ws[i].matches) {
+            for (int q = 0; q < t; q++) { free(ws[q].hits); free(ws[q].matches); }
+            free(ws); free(th);
+            return -1;
+        }
+    }
+    if (t == 1) jvTolWorkerRun(&ws[0]);
+    else {
+        for (int i = 0; i < t; i++) th[i] = crackThreadCreate(jvTolWorkerRun, &ws[i]);
+        for (int i = 0; i < t; i++) crackThreadJoin(th[i]);
+    }
+    *err = NULL;
+
+    /* merge top-N (mesmo padrao de jvRunSweep) em um JvRun local. */
+    JvRun out;
+    out.timedOut = stop;
+    out.c = 0;
+    out.hits = malloc((size_t)maxResults * sizeof(JavaHit));
+    out.matches = malloc((size_t)maxResults * n * 2 * sizeof(int));
+    if (!out.hits || !out.matches) {
+        for (int i = 0; i < t; i++) { free(ws[i].hits); free(ws[i].matches); }
+        free(ws); free(th);
+        return -1;
+    }
+    out.checked = 0;
+    for (int i = 0; i < t; i++) {
+        out.checked += ws[i].checked;
+        for (int q = 0; q < ws[i].hitCount; q++) {
+            if (out.c < maxResults) {
+                out.hits[out.c] = ws[i].hits[q];
+                memcpy(out.matches + (size_t)out.c * n * 2,
+                       ws[i].matches + (size_t)q * n * 2, (size_t)n * 2 * sizeof(int));
+                out.c++;
+            } else {
+                int64_t w = INT64_MAX; int wIdx = -1;
+                for (int u = 0; u < out.c; u++)
+                    if (out.hits[u].score < w) { w = out.hits[u].score; wIdx = u; }
+                if (ws[i].hits[q].score >= w) continue;
+                out.hits[wIdx] = ws[i].hits[q];
+                memcpy(out.matches + (size_t)wIdx * n * 2,
+                       ws[i].matches + (size_t)q * n * 2, (size_t)n * 2 * sizeof(int));
+            }
+        }
+        free(ws[i].hits); free(ws[i].matches);
+    }
+    free(ws); free(th);
+
+    char *buf = jvSerialize(&out, n, t);
+    free(out.hits); free(out.matches);
+    *err = buf;                    /* chamador devolve *err como resultado */
+    return 0;
+}
+
 SEEDFINDER_API char *seedfinder_crack_java(
     const int *types, int numTypes,
     const double *xBlocks, const double *zBlocks,
@@ -427,10 +610,6 @@ SEEDFINDER_API char *seedfinder_crack_java(
     if (endSeed > (1ULL << 48)) endSeed = 1ULL << 48;
     if (startSeed >= endSeed) return strdup("{\"error\":\"empty seed range\"}");
 
-    int allLiftable = (tolerance == 0);
-    for (int i = 0; i < n && allLiftable; i++)
-        if (targets[i].cfg.chunkRange % 4 != 0) allLiftable = 0;
-
 #if defined(__EMSCRIPTEN__)
     numThreads = 1;
 #endif
@@ -438,13 +617,22 @@ SEEDFINDER_API char *seedfinder_crack_java(
 
     double deadline = (timeBudgetSec > 0.0) ? nowms_s() + timeBudgetSec * 1000.0 : 0.0;
 
-    if (!allLiftable) {
-        if ((endSeed - startSeed) > (1ULL << 33)) {
-            return strdup("{\"error\":\"48-bit Java sweep infeasible without liftable "
-                          "structures (Igloo/Desert Pyramid/Jungle Temple/Swamp Hut/"
-                          "Outpost/Shipwreck/Ocean Ruin) - narrow start/end, use exact "
-                          "coordinates (tolerance 0), or add liftable structure evidence\"}");
-        }
+    int liftable = 1;
+    for (int i = 0; i < n && liftable; i++)
+        if (targets[i].cfg.chunkRange % 4 != 0) liftable = 0;
+
+    if (tolerance == 0 && liftable) {
+        /* LIFTING lo19 (inalterado). */
+        JvRun run;
+        if (jvRunLift(targets, n, startSeed, endSeed, maxResults, deadline,
+                      numThreads, &run) != 0)
+            return strdup("{\"error\":\"out of memory\"}");
+        char *buf = jvSerialize(&run, n, numThreads);
+        free(run.hits); free(run.matches);
+        return buf;
+    }
+    if ((endSeed - startSeed) <= (1ULL << 33)) {
+        /* SWEEP (inalterado). */
         JvRun run;
         if (jvRunSweep(targets, n, startSeed, endSeed, maxResults, deadline,
                        numThreads, &run) != 0)
@@ -453,12 +641,12 @@ SEEDFINDER_API char *seedfinder_crack_java(
         free(run.hits); free(run.matches);
         return buf;
     }
-
-    JvRun run;
-    if (jvRunLift(targets, n, startSeed, endSeed, maxResults, deadline,
-                  numThreads, &run) != 0)
+    /* LIFTING tolerante (novo). */
+    int rc = jvRunTolLift(targets, n, startSeed, endSeed, maxResults,
+                          deadline, numThreads, &err);
+    if (rc != 0) {
+        if (err) return err;
         return strdup("{\"error\":\"out of memory\"}");
-    char *buf = jvSerialize(&run, n, numThreads);
-    free(run.hits); free(run.matches);
-    return buf;
+    }
+    return err;                    /* jvRunTolLift devolveu o JSON pronto */
 }
