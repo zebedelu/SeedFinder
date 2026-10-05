@@ -93,17 +93,18 @@ static int testSweep(void)
     return ok;
 }
 
-/* Guard: varredura > 2^33 sem estruturas liftaveis -> erro acionavel. */
+/* Guard amostral: tol 8 + 3 estruturas grandes em full-range -> o pre-check
+ * 2^22 do LIFTING tolerante rejeita com "infeasible" (~1 s, sem hang). */
 static int testGuard(void)
 {
-    int types[] = { Village, Monument, Mansion, Ancient_City };
-    Pos p[4][8];
-    double xs[4], zs[4];
-    for (int i = 0; i < 4; i++) {
+    int types[] = { Village, Mansion, Monument };
+    Pos p[3][8];
+    double xs[3], zs[3];
+    for (int i = 0; i < 3; i++) {
         if (genStructures(types[i], FIX1, p[i], 8) < 1) return 0;
         xs[i] = (double)p[i][0].x; zs[i] = (double)p[i][0].z;
     }
-    char *r = seedfinder_crack_java(types, 4, xs, zs, 0, 0, 1ULL << 48, 50, 30.0, 8);
+    char *r = seedfinder_crack_java(types, 3, xs, zs, 8, 0, 1ULL << 48, 50, 30.0, 8);
     if (!r) return 0;
     int ok = (strstr(r, "infeasible") != NULL);
     free(r);
