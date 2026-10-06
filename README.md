@@ -215,7 +215,11 @@ curl -X POST http://127.0.0.1:7890/seedcracker \
 
 > **Breaking change note for clients:** the route **auto-detects 64-bit mode whenever `end` > 2^32** (or `"mode": "64"` is explicit) — **POST JSON only; GET stays 32-bit**. 32-bit clients that used to pass a large/absent-style upper bound beyond `2^32` will now get the 64-bit engine instead of a wrapped 32-bit sweep — pass `end ≤ 4294967296` to keep 32-bit behavior.
 
-The same `seedfinder_crack_java` engine also recovers the **low 48 bits of Java Edition seeds** — use `/seedcracker` with `mc=java`, or the fixed `/seedcracker/java` / `/seedcracker/bedrock` routes (the latter forces the Bedrock 32-bit engine). Java recovering with approximate coordinates (tolerance 0–8) works for big structures (Village/Monument/Ancient City/Mansion); full-48 sweeps return `partial` or an actionable guard error instead of hanging. The top 16 bits (48–63) remain unrecoverable from structures alone.
+The same `seedfinder_crack_java` engine also recovers the **low 48 bits of Java Edition seeds** — use `/seedcracker` with `mc=java`, or the fixed `/seedcracker/java` / `/seedcracker/bedrock` routes (the latter forces the Bedrock 32-bit engine).
+
+For **exact** coordinates (`tolerance 0`) of *uniform* structures (Village, Desert/Jungle temples, Swamp Hut, Igloo, Ocean Ruin, Shipwreck, Pillager Outpost, Ruined Portal, Trail Ruins, Trial Chambers), the engine runs a **meet-in-the-middle** search over the full 48-bit space in one shot — no start/end window, no End-pillar, no GPU. It needs roughly **40 bits** of structure information (about 5–6 exact structures); too few returns an actionable error. The recovered structure seed is then lifted to a full 64-bit **worldseed** (`seed_str`) by validating the Java biome gate on the observed chunks. The algorithm is Matthew Bolan's (`mjtb49`), reimplemented clean-room.
+
+Approximate coordinates (`tolerance > 0`) still work but only with a narrow `start`/`end` window (the sweep path). Full-range `tolerance > 0` is no longer supported: the old tolerant lift was unsound and was removed, and now returns an actionable error. The top 16 bits (48–63) remain unrecoverable from structures alone.
 
 ## API reference
 
