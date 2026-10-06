@@ -79,6 +79,13 @@ def _bind(handle) -> None:
     if hasattr(handle, "seedfinder_crack_java"):
         handle.seedfinder_crack_java.argtypes = _CRACK_ARGTYPES
         handle.seedfinder_crack_java.restype = ctypes.c_void_p
+    # MITM Java: assinatura sem tolerance/start/end (sempre tol 0, full-range).
+    if hasattr(handle, "seedfinder_crack_mitm"):
+        handle.seedfinder_crack_mitm.argtypes = (
+            [ctypes.POINTER(ctypes.c_int), ctypes.c_int,
+             ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+             ctypes.c_int, ctypes.c_double, ctypes.c_int])
+        handle.seedfinder_crack_mitm.restype = ctypes.c_void_p
     # Lib predating Java scan support is valid - bind only when present,
     # same degrade rule as seedfinder_crack.
     if hasattr(handle, "seedfinder_scan_java"):

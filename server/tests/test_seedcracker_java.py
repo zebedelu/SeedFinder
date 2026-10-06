@@ -110,6 +110,27 @@ def main():
 
     print("java seedcracker routes + tolerant lift guard OK")
 
+    # 11. MITM via API: seed > 2^32 com 6 estruturas uniformes exatas, tol 0,
+    #     full-range -> recuperado (o dispatch do C escolhe o MITM).
+    #     Coordenadas reais de seed 4294967300 (2^32+4), MC_NEWEST,
+    #     via cubiomes getStructurePos, tipos 5/23/24/4/1/10.
+    r = app.test_client().post("/seedcracker/java", json={
+        "tolerance": 0, "start": 0, "end": 1 << 48, "max": 50, "max_seconds": 120,
+        "structures": [
+            {"type": 5,  "x": -4080, "z": -4080},   # Village
+            {"type": 23, "x": -4064, "z": -4048},   # Trail Ruins
+            {"type": 24, "x": -4256, "z": -4240},   # Trial Chambers
+            {"type": 4,  "x": -3824, "z": -4064},   # Igloo
+            {"type": 1,  "x": -3744, "z": -4064},   # Desert Pyramid
+            {"type": 10, "x": -3312, "z": -4096},   # Outpost
+        ]})
+    body = r.get_json()
+    assert r.status_code == 200, (r.status_code, body)
+    assert body[0]["status"] in ("ok", "partial"), body[0]
+    assert any(c.get("seed") is not None for c in body[1:]), body[:3]
+
+    print("java seedcracker routes + mitm OK")
+
 
 if __name__ == "__main__":
     main()
