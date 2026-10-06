@@ -428,7 +428,7 @@ Bug reports, feature ideas, pull requests, and doc fixes are all welcome. For an
 
 ## License
 
-[Apache License 2.0](LICENSE)
+[Zlib License](LICENSE)
 
 ## Authors
 
