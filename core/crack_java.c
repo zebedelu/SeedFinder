@@ -3,6 +3,7 @@
  * da seed 64-bit completa, fora do escopo 48-bit). Mesmo precedente do
  * crack_auto.c (varredura placement-only). */
 #include "crack_java.h"
+#include "crack_mitm.h"
 #include "platform_threads.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -632,7 +633,7 @@ SEEDFINDER_API char *seedfinder_crack_java(
         return buf;
     }
     if ((endSeed - startSeed) <= (1ULL << 33)) {
-        /* SWEEP (inalterado). */
+        /* SWEEP (inalterado): janela dada e' respeitada (precede o MITM). */
         JvRun run;
         if (jvRunSweep(targets, n, startSeed, endSeed, maxResults, deadline,
                        numThreads, &run) != 0)
@@ -641,12 +642,33 @@ SEEDFINDER_API char *seedfinder_crack_java(
         free(run.hits); free(run.matches);
         return buf;
     }
-    /* LIFTING tolerante (novo). */
-    int rc = jvRunTolLift(targets, n, startSeed, endSeed, maxResults,
-                          deadline, numThreads, &err);
-    if (rc != 0) {
-        if (err) return err;
-        return strdup("{\"error\":\"out of memory\"}");
+    if (tolerance == 0 && mitmCanRun(targets, n)) {
+        /* MITM (novo): exato, cobre os 48 bits inteiros, t=0. Como o span e'
+         * > 2^33 e nenhuma janela viavel foi dada, o MITM resolve o espaco
+         * todo (start/end nao se aplicam). */
+        return mitmRun(targets, n, maxResults, deadline);
     }
-    return err;                    /* jvRunTolLift devolveu o JSON pronto */
+    /* Ramo tolerante corrigido (Task 4): o LIFTING tolerante e' UNSOUND no
+     * full-range (sRep=(hiBase<<32)|lo32 com hiBase fixo filtra seeds cujo hi16
+     * difere). Só e' viavel com janela estreita (SWEEP, acima). */
+    return strdup("{\"error\":\"tolerance > 0 over a span > 2^33 is not "
+                  "supported (unsound tolerant lift) - provide a narrow "
+                  "start/end window or use tolerance 0 with exact coordinates "
+                  "(MITM)\"}");
+}
+
+SEEDFINDER_API char *seedfinder_crack_mitm(
+    const int *types, int numTypes,
+    const double *xBlocks, const double *zBlocks,
+    int maxResults, double timeBudgetSec, int numThreads)
+{
+    (void)numThreads;
+    JavaTarget targets[JAVA_MAX_STRUCTURES];
+    int n = 0; char *err = NULL;
+    if (javaTargetsBuild(types, numTypes, xBlocks, zBlocks, 0, targets, &n, &err))
+        return err;
+    if (maxResults <= 0 || maxResults > 2000)
+        return strdup("{\"error\":\"maxResults must be between 1 and 2000\"}");
+    double deadline = (timeBudgetSec > 0.0) ? nowms_s() + timeBudgetSec * 1000.0 : 0.0;
+    return mitmRun(targets, n, maxResults, deadline);
 }
