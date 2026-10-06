@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: SeedFinder docs and live API
+    url: https://www.mineseedfinder.com
+    about: Try the hosted instance or read the API reference before opening an issue.
+  - name: README and build instructions
+    url: https://github.com/zebedelu/SeedFinder#building-from-source
+    about: Setup and build steps are covered here.

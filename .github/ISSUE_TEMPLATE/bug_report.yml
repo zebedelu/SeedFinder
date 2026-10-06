@@ -1,0 +1,76 @@
+name: Bug report
+description: Something crashed, errored, or gave the wrong answer
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [existing issues](https://github.com/zebedelu/SeedFinder/issues) first. If a structure was missing or in the wrong place, use the Structure accuracy template instead.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where did it happen?
+      description: Pick what you were running when it broke.
+      options:
+        - Hosted site (mineseedfinder.com)
+        - Local server or SeedFinder.exe
+        - Flarial overlay
+        - SeedCracker
+        - Built from source
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include the exact error text if there is one.
+      placeholder: The scan returned a 500 after a few seconds.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Set the seed to ...
+        3. Click ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: request
+    attributes:
+      label: The request you made
+      description: Seed, position, radius, types, or the full URL. Leave blank if it does not apply.
+      placeholder: seed=8675309&x=0&z=0&radius=100&types=5
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Your setup
+      description: OS, browser or Flarial version, and whether you used Bedrock or Java.
+      placeholder: Windows 11, Chrome 140, Bedrock
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and did not find this.
+          required: true

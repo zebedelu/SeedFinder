@@ -1,0 +1,78 @@
+name: Structure accuracy
+description: A structure was missing or listed in the wrong place
+title: "[Accuracy]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when the scan result does not match what the game generated. Crashes and errors go in the Bug report template instead.
+  - type: input
+    id: seed
+    attributes:
+      label: World seed
+      placeholder: "8675309"
+    validations:
+      required: true
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition
+      options:
+        - Bedrock
+        - Java
+    validations:
+      required: true
+  - type: input
+    id: position
+    attributes:
+      label: Player position you scanned from
+      description: As x,z in blocks.
+      placeholder: "0,0"
+    validations:
+      required: true
+  - type: input
+    id: structure
+    attributes:
+      label: Structure type
+      description: The name and its ID. See the supported structures list in the README.
+      placeholder: Village (5)
+    validations:
+      required: true
+  - type: input
+    id: radius
+    attributes:
+      label: Radius
+      placeholder: "100"
+    validations:
+      required: true
+  - type: textarea
+    id: returned
+    attributes:
+      label: What the API returned
+      description: Paste the JSON from your request.
+      render: json
+    validations:
+      required: false
+  - type: input
+    id: actual
+    attributes:
+      label: Where the structure actually is in-game
+      description: As x,z in blocks. If it is missing entirely, say so.
+      placeholder: "-280,152"
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, or coordinates of nearby landmarks, help narrow it down.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: This structure is region-based. It is not Desert Well or Amethyst Geode, which SeedFinder does not support.
+          required: true
