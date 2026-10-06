@@ -87,8 +87,9 @@ def main():
 
     print("java seedcracker routes + mc dispatch OK")
 
-    # 9. tolerance > 0 + full-range com estruturas grandes: o novo LIFTING
-    #    tolerante responde com o guard acionavel (~1 s), nao um hang.
+    # 9. tolerance > 0 + full-range com estruturas grandes: o LIFTING tolerante
+    #    foi removido por ser unsound -> erro acionavel "not supported" imediato
+    #    (~0 s), nao um hang.
     #    (4a estrutura adicionada: a rota exige MIN_STRUCTURES=4 - o C aceita
     #    1-24, mas a API valida 4+ antes de chegar ao motor.)
     r = app.test_client().post("/seedcracker/java", json={
@@ -101,7 +102,7 @@ def main():
         ]})
     body = r.get_json()
     assert r.status_code == 200, (r.status_code, body)
-    assert body[0]["status"] == "error" and "infeasible" in body[0]["message"], body[0]
+    assert body[0]["status"] == "error" and "not supported" in body[0]["message"], body[0]
 
     # 10. budget Java alto (full-range leva minutos) aceita max_seconds=2400
     #     (o clamp de 120 da rota 32-bit nao se aplica mais ao Java).

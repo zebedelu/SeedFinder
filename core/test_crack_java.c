@@ -1,7 +1,7 @@
 /* core/test_crack_java.c — parity + verifier tests for the Java cracker.
  * Build (MSYS2 UCRT64 gcc, PATH must include C:\msys64\ucrt64\bin):
  *   gcc -O2 -std=c11 -I. -I.. -I../ChunkBiomesGUI/cubiomes -o test_crack_java.exe \
- *       test_crack_java.c crack_java.c \
+ *       test_crack_java.c crack_java.c crack_mitm.c \
  *       ../ChunkBiomesGUI/cubiomes/generator.c ../ChunkBiomesGUI/cubiomes/finders.c \
  *       ../ChunkBiomesGUI/cubiomes/biomes.c ../ChunkBiomesGUI/cubiomes/noise.c \
  *       ../ChunkBiomesGUI/cubiomes/util.c ../ChunkBiomesGUI/cubiomes/layers.c \
@@ -93,8 +93,9 @@ static int testSweep(void)
     return ok;
 }
 
-/* Guard amostral: tol 8 + 3 estruturas grandes em full-range -> o pre-check
- * 2^22 do LIFTING tolerante rejeita com "infeasible" (~1 s, sem hang). */
+/* Guard: tol 8 + 3 estruturas grandes em full-range -> rejeitado com a mensagem
+ * acionavel "not supported" (o LIFTING tolerante foi removido por ser unsound;
+ * retorno imediato, sem hang nem sweep 2^32). */
 static int testGuard(void)
 {
     int types[] = { Village, Mansion, Monument };
@@ -106,7 +107,7 @@ static int testGuard(void)
     }
     char *r = seedfinder_crack_java(types, 3, xs, zs, 8, 0, 1ULL << 48, 50, 30.0, 8);
     if (!r) return 0;
-    int ok = (strstr(r, "infeasible") != NULL);
+    int ok = (strstr(r, "not supported") != NULL || strstr(r, "infeasible") != NULL);
     free(r);
     return ok;
 }

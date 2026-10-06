@@ -1,7 +1,7 @@
 /* core/test_java_tol.c — testes do LIFTING tolerante (span > 2^33).
  * Build (MSYS2 UCRT64 gcc, PATH deve incluir C:\msys64\ucrt64\bin):
  *   gcc -O2 -std=c11 -I. -I.. -I../ChunkBiomesGUI/cubiomes -o test_java_tol.exe \
- *       test_java_tol.c crack_java.c \
+ *       test_java_tol.c crack_java.c crack_mitm.c \
  *       ../ChunkBiomesGUI/cubiomes/generator.c ../ChunkBiomesGUI/cubiomes/finders.c \
  *       ../ChunkBiomesGUI/cubiomes/biomes.c ../ChunkBiomesGUI/cubiomes/noise.c \
  *       ../ChunkBiomesGUI/cubiomes/util.c ../ChunkBiomesGUI/cubiomes/layers.c \
@@ -33,8 +33,8 @@ static int genStructures(int st, uint64_t seed, Pos *out, int max)
 /* Especifica as coordenadas aproximadas: adiciona um desvio em blocos dentro
  * de tolerance (simula jogador lendo Chunkbase de forma aproximada).
  * So o eixo X e' desviado: desviar X e Z juntos daria d2 = 2*d^2, que excede
- * maxD2 = tolerance^2 quando d = 1 (o seed verdadeiro deixaria de passar o
- * jvHitLo32 e o sweep 2^32 retornaria vazio). */
+ * maxD2 = tolerance^2 quando d = 1 (um sweep tolerante deixaria de casar o
+ * seed verdadeiro). */
 static void jitterPos(double *xs, double *zs, int i, int tol)
 {
     int d = (tol > 0) ? (i % tol) : 0;        /* 0..tol-1, deterministico */
@@ -42,12 +42,11 @@ static void jitterPos(double *xs, double *zs, int i, int tol)
     (void)zs;
 }
 
-/* FULL-RANGE com estruturas grandes + tolerance 1: o caminho SWEEP seria
- * inviavel (span 2^48) -> hoje retorna o guard "infeasible"; o novo LIFTING
- * tolerante deve recuperar a seed. Roda ~2-4 min (Stage A = 2^32) e devolve
- * partial (budget 120 s) com o seed presente (Stage B intercalado acha
- * FIX1 nos primeiros segundos). */
-static int testTolFullRecovery(void)
+/* FULL-RANGE com estruturas grandes + tolerance 1: o LIFTING tolerante foi
+ * REMOVIDO por ser unsound (sRep com hiBase fixo filtra seeds cujo hi16 difere).
+ * O full-range tol>0 agora retorna imediatamente o erro acionavel "not supported"
+ * (sem hang nem sweep 2^32). */
+static int testTolFullRejected(void)
 {
     int types[] = { Village, Monument, Ancient_City, Mansion, Igloo };
     Pos p[5][8];
@@ -55,19 +54,20 @@ static int testTolFullRecovery(void)
     for (int i = 0; i < 5; i++) {
         if (genStructures(types[i], FIX1, p[i], 8) < 1) return 0;
         xs[i] = (double)p[i][0].x; zs[i] = (double)p[i][0].z;
-        jitterPos(xs, zs, i, 2);              /* tolerance 1, desvios 0..16 bl */
+        jitterPos(xs, zs, i, 2);
     }
     char *r = seedfinder_crack_java(types, 5, xs, zs, 1,
                                     0, 1ULL << 48, 2000, 120.0, 8);
     if (!r) return 0;
-    int ok = (strstr(r, "\"seed\":8675309") != NULL);
-    if (!ok) printf("  full-range tol1: %s\n", r);
+    int ok = (strstr(r, "not supported") != NULL);
+    if (!ok) printf("  full-range tol1 should be rejected: %s\n", r);
     free(r);
     return ok;
 }
 
-/* GUARD amostral: tolerance 8, 3 estruturas grandes, full-range -> pre-check
- * 2^22 prediz ~1e8 sobreviventes -> erro "infeasible" em ~1 s (NAO hang). */
+/* GUARD: tolerance 8, 3 estruturas grandes, full-range -> rejeitado com o erro
+ * acionavel "not supported" imediatamente (o LIFTING tolerante foi removido;
+ * nao ha mais pre-check "infeasible", nem hang). */
 static int testTolInfeasibleGuard(void)
 {
     int types[] = { Village, Mansion, Monument };
@@ -80,7 +80,7 @@ static int testTolInfeasibleGuard(void)
     char *r = seedfinder_crack_java(types, 3, xs, zs, 8,
                                     0, 1ULL << 48, 2000, 30.0, 8);
     if (!r) return 0;
-    int ok = (strstr(r, "infeasible") != NULL);
+    int ok = (strstr(r, "not supported") != NULL);
     if (!ok) printf("  guard tol8: %s\n", r);
     free(r);
     return ok;
@@ -88,8 +88,8 @@ static int testTolInfeasibleGuard(void)
 
 int main(void)
 {
-    if (!testTolFullRecovery())  { printf("FAIL tolerant full-range recovery\n");  return 1; }
+    if (!testTolFullRejected())    { printf("FAIL tolerant full-range rejection\n"); return 1; }
     if (!testTolInfeasibleGuard()) { printf("FAIL tolerant infeasible guard\n");   return 1; }
-    printf("OK tolerant lifting (full-range tol1 recovery + guard)\n");
+    printf("OK tolerant lifting (full-range rejected + guard)\n");
     return 0;
 }
