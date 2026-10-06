@@ -34,7 +34,7 @@ int main(void)
         xs[i] = (double)p[i][0].x; zs[i] = (double)p[i][0].z;
     }
     char *r = seedfinder_crack_java(MITM_TYPES, N_TYPES, xs, zs, 0,
-                                    0, 1ULL << 48, 50, 300.0, 8);
+                                    0, 1ULL << 48, 50, 120.0, 8);
     if (!r) { printf("FAIL null\n"); return 1; }
     int ok = (strstr(r, "\"seed_str\":") != NULL);
     if (ok) {

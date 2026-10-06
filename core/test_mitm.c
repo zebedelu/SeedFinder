@@ -49,7 +49,7 @@ static int runMitm(uint64_t seed, const char **out)
         xs[n] = (double)p[i][0].x; zs[n] = (double)p[i][0].z; n++;
     }
     char *r = seedfinder_crack_java(MITM_TYPES, n, xs, zs, 0,
-                                    0, 1ULL << 48, 2000, 300.0, 8);
+                                    0, 1ULL << 48, 2000, 120.0, 8);
     if (!r) return 0;
     *out = r;
     return 1;
@@ -95,11 +95,36 @@ static int testBitsGate(void)
     return ok;
 }
 
+/* Conjunto TODO-LIFTAVEL e uniforme (chunkRange % 4 == 0, nao-pot2): o dispatch
+ * deve escolher o MITM (nao o LIFT full-range, inviavel a 6 estruturas). Cobre
+ * o Critical da revisao final. */
+static const int LIFTABLE_TYPES[] = { Igloo, Desert_Pyramid, Jungle_Temple,
+                                      Swamp_Hut, Shipwreck, Outpost };
+#define N_LIFT ((int)(sizeof(LIFTABLE_TYPES)/sizeof(LIFTABLE_TYPES[0])))
+
+static int testLiftableUniform(void)
+{
+    static Pos p[N_LIFT][8];
+    double xs[N_LIFT], zs[N_LIFT];
+    for (int i = 0; i < N_LIFT; i++) {
+        if (genStructures(LIFTABLE_TYPES[i], BUGSEED, p[i], 8) < 1) return 0;
+        xs[i] = (double)p[i][0].x; zs[i] = (double)p[i][0].z;
+    }
+    char *r = seedfinder_crack_java(LIFTABLE_TYPES, N_LIFT, xs, zs, 0,
+                                    0, 1ULL << 48, 50, 120.0, 8);
+    if (!r) return 0;
+    int ok = (strstr(r, "\"seed\":4294967300") != NULL);
+    if (!ok) printf("  liftable uniform: %.200s\n", r);
+    free(r);
+    return ok;
+}
+
 int main(void)
 {
-    if (!testBitsGate())    { printf("FAIL bits gate\n");        return 1; }
-    if (!testFixture())     { printf("FAIL fixture 8675309\n");   return 1; }
-    if (!testBugReport())   { printf("FAIL bug report 2^32+4\n"); return 1; }
-    printf("OK mitm (bits gate + fixture + bug report)\n");
+    if (!testBitsGate())        { printf("FAIL bits gate\n");        return 1; }
+    if (!testLiftableUniform()) { printf("FAIL liftable uniform\n"); return 1; }
+    if (!testFixture())         { printf("FAIL fixture 8675309\n");   return 1; }
+    if (!testBugReport())       { printf("FAIL bug report 2^32+4\n"); return 1; }
+    printf("OK mitm (bits gate + fixture + bug report + liftable uniform)\n");
     return 0;
 }

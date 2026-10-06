@@ -439,6 +439,14 @@ SEEDFINDER_API char *seedfinder_crack_java(
     for (int i = 0; i < n && liftable; i++)
         if (targets[i].cfg.chunkRange % 4 != 0) liftable = 0;
 
+    /* Sem janela viavel (span > 2^33), tol 0 e estruturas uniformes nao-pot2:
+     * o MITM resolve os 48 bits inteiros e PRECEDE o LIFT full-range, que e'
+     * inviavel a ~5-6 estruturas (2^29 hi por sobrevivente lo19). Janelas reais
+     * (span <= 2^33) seguem no SWEEP abaixo. */
+    if (tolerance == 0 && (endSeed - startSeed) > (1ULL << 33) &&
+        mitmCanRun(targets, n))
+        return mitmRun(targets, n, maxResults, deadline);
+
     if (tolerance == 0 && liftable) {
         /* LIFTING lo19 (inalterado). */
         JvRun run;
@@ -450,7 +458,7 @@ SEEDFINDER_API char *seedfinder_crack_java(
         return buf;
     }
     if ((endSeed - startSeed) <= (1ULL << 33)) {
-        /* SWEEP (inalterado): janela dada e' respeitada (precede o MITM). */
+        /* SWEEP (inalterado): janela dada e' respeitada. */
         JvRun run;
         if (jvRunSweep(targets, n, startSeed, endSeed, maxResults, deadline,
                        numThreads, &run) != 0)
@@ -458,12 +466,6 @@ SEEDFINDER_API char *seedfinder_crack_java(
         char *buf = jvSerialize(&run, n, numThreads);
         free(run.hits); free(run.matches);
         return buf;
-    }
-    if (tolerance == 0 && mitmCanRun(targets, n)) {
-        /* MITM (novo): exato, cobre os 48 bits inteiros, t=0. Como o span e'
-         * > 2^33 e nenhuma janela viavel foi dada, o MITM resolve o espaco
-         * todo (start/end nao se aplicam). */
-        return mitmRun(targets, n, maxResults, deadline);
     }
     /* Ramo tolerante corrigido (Task 4): o LIFTING tolerante e' UNSOUND no
      * full-range (sRep=(hiBase<<32)|lo32 com hiBase fixo filtra seeds cujo hi16
