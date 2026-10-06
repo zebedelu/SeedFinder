@@ -28,6 +28,7 @@
  * trie. Se medir lento: prefix-index dos 1-2 primeiros slots (FloatInTheMiddle)
  * ou threading do sweep (faixas disjuntas de U). */
 #include "crack_mitm.h"
+#include "ChunkBiomesGUI/cubiomes/generator.h"
 #include "platform_threads.h"
 #include <stdlib.h>
 #include <string.h>
@@ -42,6 +43,7 @@
 #define MITM_A2       341873128712ULL
 #define MITM_B2       132897987541ULL
 #define MITM_GATE_BITS 40.0
+#define MITM_WANT     4
 
 static inline long long mitmFloorDiv(long long a, long long b)
 {
@@ -240,6 +242,30 @@ static char *mitmError(const char *msg)
     return s;
 }
 
+/* Fase 2: para um s48, testa os 2^16 hi16: aplica a seed 64-bit e exige
+ * isViableStructurePos na celula de cada estrutura observada. Devolve quantos
+ * worldseeds achou (<= want). */
+static int mitmLiftHi16(const JavaTarget *all, int n, uint64_t s48,
+                        uint64_t *out, int64_t *outScore, int want)
+{
+    Generator g;
+    setupGenerator(&g, MC_NEWEST, 0);
+    int got = 0;
+    for (uint64_t hi = 0; hi < (1ULL << 16) && got < want; hi++) {
+        uint64_t full = (hi << 48) | s48;
+        applySeed(&g, DIM_OVERWORLD, full);
+        int ok = 1;
+        for (int k = 0; k < n && ok; k++) {
+            long long px = (long long)all[k].chunkX * 16;
+            long long pz = (long long)all[k].chunkZ * 16;
+            if (!isViableStructurePos(all[k].type, &g, (int)px, (int)pz, 0))
+                ok = 0;
+        }
+        if (ok) { out[got] = full; outScore[got] = 0; got++; }
+    }
+    return got;
+}
+
 char *mitmRun(const JavaTarget *targets, int n, int maxResults, double deadline)
 {
     MitmSlot slots[MITM_MAXJ]; int J = 0; double bits = 0.0;
@@ -316,21 +342,58 @@ char *mitmRun(const JavaTarget *targets, int n, int maxResults, double deadline)
         while (j >= 0 && c.hits[j].score > key.score) { c.hits[j + 1] = c.hits[j]; j--; }
         c.hits[j + 1] = key;
     }
-    size_t cap = 256 + (size_t)c.nHits * ((size_t)n * 28 + 96);
+    /* Fase 2: lift dos hi16 por structure seed -> worldseeds (com seed_str).
+     * ponytail: no maximo MITM_WANT worldseeds por s48; sem nenhum, o proprio
+     * s48 vira seed_str (fallback placement-only). */
+    size_t maxOut = (size_t)c.nHits * MITM_WANT + 1;
+    uint64_t *oSeed  = malloc(maxOut * sizeof(uint64_t));
+    uint64_t *oWorld = malloc(maxOut * sizeof(uint64_t));
+    int64_t  *oScore = malloc(maxOut * sizeof(int64_t));
+    int      *oIdx   = malloc(maxOut * sizeof(int));
+    if (!oSeed || !oWorld || !oScore || !oIdx) {
+        free(oSeed); free(oWorld); free(oScore); free(oIdx);
+        for (int i = 0; i < c.nHits; i++) free(c.hits[i].matches);
+        free(c.hits); free(ent);
+        return mitmError("out of memory");
+    }
+    size_t nOut = 0;
+    for (int i = 0; i < c.nHits && nOut < maxOut; i++) {
+        uint64_t ws[MITM_WANT]; int64_t wsc[MITM_WANT];
+        int got = mitmLiftHi16(targets, n, c.hits[i].seed, ws, wsc, MITM_WANT);
+        if (got > 0) {
+            for (int q = 0; q < got && nOut < maxOut; q++) {
+                oSeed[nOut] = c.hits[i].seed; oWorld[nOut] = ws[q];
+                oScore[nOut] = c.hits[i].score; oIdx[nOut] = i; nOut++;
+            }
+        } else {
+            oSeed[nOut] = c.hits[i].seed; oWorld[nOut] = c.hits[i].seed;
+            oScore[nOut] = c.hits[i].score; oIdx[nOut] = i; nOut++;
+        }
+    }
+    size_t cap = 256 + nOut * ((size_t)n * 28 + 160);
     char *buf = malloc(cap);
+    if (!buf) {
+        free(oSeed); free(oWorld); free(oScore); free(oIdx);
+        for (int i = 0; i < c.nHits; i++) free(c.hits[i].matches);
+        free(c.hits); free(ent);
+        return mitmError("out of memory");
+    }
     int off = sprintf(buf, "{\"results\":[");
-    for (int i = 0; i < c.nHits; i++) {
-        MitmHit *h = &c.hits[i];
-        off += sprintf(buf + off, "%s{\"seed\":%llu,\"score\":%lld,\"matches\":[",
-                       i ? "," : "", (unsigned long long)h->seed, (long long)h->score);
+    for (size_t i = 0; i < nOut; i++) {
+        const int *mm = c.hits[oIdx[i]].matches;
+        off += sprintf(buf + off,
+            "%s{\"seed\":%llu,\"seed_str\":\"%llu\",\"score\":%lld,\"matches\":[",
+            i ? "," : "", (unsigned long long)oSeed[i],
+            (unsigned long long)oWorld[i], (long long)oScore[i]);
         for (int k = 0; k < n; k++)
             off += sprintf(buf + off, "%s[%d,%d]", k ? "," : "",
-                           h->matches[k * 2], h->matches[k * 2 + 1]);
+                           mm[k * 2], mm[k * 2 + 1]);
         off += sprintf(buf + off, "]}");
     }
     sprintf(buf + off, "],\"checked\":%llu,\"timed_out\":%s,\"threads\":1}",
             (unsigned long long)(N + (timedOut ? 0 : nU)),
             timedOut ? "true" : "false");
+    free(oSeed); free(oWorld); free(oScore); free(oIdx);
     for (int i = 0; i < c.nHits; i++) free(c.hits[i].matches);
     free(c.hits); free(ent);
     return buf;
