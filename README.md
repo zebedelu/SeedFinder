@@ -424,10 +424,6 @@ Bug reports, feature ideas, pull requests, and doc fixes are all welcome. For an
 - Biome generation: [Cubiomes](https://github.com/Cubitect/cubiomes) (Cubitect, MIT License)
 - Bedrock GUI reference: [ChunkBiomesGUI](https://github.com/Nel-S/ChunkBiomes)
 
-## License
-
-[Zlib License](LICENSE)
-
 ## Authors
 
 [@zebedelu](https://github.com/zebedelu)
