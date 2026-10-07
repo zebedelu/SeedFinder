@@ -9,7 +9,6 @@
 </p>
 
 <p align="center">
-  <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Minecraft%20Bedrock%20%2B%20Java-4c1">
 </p>
 
@@ -63,7 +62,6 @@ Target platform is Minecraft Bedrock Edition (1.18 through the latest release) a
 - **Multi-type queries** - ask for several structures in one request (`types=5,8,9`) instead of one call per type.
 - **SeedCracker (Bedrock seed search by structure layout)** - describe the structures you want and where, and get the Bedrock seeds that generate them there. Sweeps the 32-bit seed space in parallel in native C inside a time budget. Runs on the local API - see [SeedCracker](#seedcracker-bedrock-seed-search-by-structure-layout).
 - **No dependencies for players.** The packaged `.exe` bundles the server itself; no Python or pip needed on the player's machine.
-- Apache-2.0, source available, and nothing in the code sends data anywhere except the request you made.
 
 ## Live example
 
