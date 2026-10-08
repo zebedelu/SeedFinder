@@ -44,6 +44,9 @@
 #define MITM_B2       132897987541ULL
 #define MITM_GATE_BITS 40.0
 #define MITM_WANT     4
+#define MITM_GUARD_SAMPLE_U  (1u << 20)      /* amostra do guard de candidatos */
+#define MITM_GUARD_MAX_EST   (1ull << 20)    /* teto de candidatos estimados  */
+#define MITM_DEFAULT_BUDGET_MS 300000.0      /* cap default quando budget<=0  */
 
 static inline long long mitmFloorDiv(long long a, long long b)
 {
@@ -172,11 +175,13 @@ typedef struct {
     const JavaTarget *all; int nAll;
     uint64_t U;
     MitmHit *hits; int nHits; int maxResults;
+    uint64_t totalHits;
 } MitmCtx;
 
 static void mitmPush(MitmCtx *c, uint64_t seed, int64_t score, const int *mm)
 {
     size_t n = (size_t)c->nAll * 2;
+    c->totalHits++;
     if (c->nHits < c->maxResults) {
         int *m = malloc(n * sizeof(int));
         if (!m) return;                 /* OOM: nao conta um hit sem matches */
@@ -266,7 +271,8 @@ static int mitmLiftHi16(const JavaTarget *all, int n, uint64_t s48,
     return got;
 }
 
-char *mitmRun(const JavaTarget *targets, int n, int maxResults, double deadline)
+char *mitmRun(const JavaTarget *targets, int n, int maxResults, double deadline,
+              uint64_t startU, uint64_t endU)
 {
     MitmSlot slots[MITM_MAXJ]; int J = 0; double bits = 0.0;
     int sel = mitmSelect(targets, n, slots, &J, &bits);
@@ -321,18 +327,53 @@ char *mitmRun(const JavaTarget *targets, int n, int maxResults, double deadline)
     qsort(ent, N, sizeof(MitmEnt), mitmEntCmp);
     L.ent = ent; L.nEnt = N;
 
-    /* Sweep de U. */
+    if (startU >= endU || endU > (1ULL << MITM_L)) {
+        free(ent);
+        return mitmError("invalid MITM window [startU,endU)");
+    }
+    /* Cap default: sem budget, limita o sweep (evita varredura ilimitada). */
+    if (deadline <= 0.0) deadline = nowms_s() + MITM_DEFAULT_BUDGET_MS;
+
+    /* Guard amostrado: conta hits nas primeiras MITM_GUARD_SAMPLE_U janelas U e
+     * extrapola; sets fracamente determinados sao rejeitados sem varredura. */
+    uint64_t nU = endU - startU;
+    if (nU > MITM_GUARD_SAMPLE_U) {
+        MitmCtx probe; memset(&probe, 0, sizeof probe);
+        probe.L = &L; probe.all = targets; probe.nAll = n; probe.maxResults = 0;
+        probe.hits = calloc(1, sizeof(MitmHit));
+        if (!probe.hits) { free(ent); return mitmError("out of memory"); }
+        for (uint64_t U = startU; U < startU + MITM_GUARD_SAMPLE_U; U++) {
+            probe.U = U;
+            mitmDfs(&probe, 0, 0, L.nEnt, 0);
+            if (probe.totalHits > 0 &&
+                probe.totalHits * (nU / MITM_GUARD_SAMPLE_U) > MITM_GUARD_MAX_EST)
+                break;
+        }
+        uint64_t est = probe.totalHits * (nU / MITM_GUARD_SAMPLE_U);
+        free(probe.hits);
+        if (est > MITM_GUARD_MAX_EST) {
+            char msg[224];
+            snprintf(msg, sizeof msg, "~%llu candidate seeds are expected to "
+                     "match these structures (weakly determined input) - add "
+                     "stronger or more spread-out structures, or give a "
+                     "Start/End window", (unsigned long long)est);
+            free(ent);
+            return mitmError(msg);
+        }
+    }
+
+    /* Sweep de U na janela [startU,endU), com early-stop em maxResults. */
     MitmCtx c; c.L = &L; c.all = targets; c.nAll = n; c.U = 0;
-    c.maxResults = maxResults; c.nHits = 0;
+    c.maxResults = maxResults; c.nHits = 0; c.totalHits = 0;
     c.hits = calloc((size_t)maxResults, sizeof(MitmHit));
     if (!c.hits) { free(ent); return mitmError("out of memory"); }
-    uint64_t nU = (uint64_t)1 << (48 - MITM_L);
     int timedOut = 0;
-    for (uint64_t U = 0; U < nU; U++) {
+    for (uint64_t U = startU; U < endU && c.nHits < maxResults; U++) {
         c.U = U;
         mitmDfs(&c, 0, 0, L.nEnt, 0);
-        if ((U & 0xFFFFFULL) == 0xFFFFFULL && deadline > 0.0 &&
-            nowms_s() > deadline) { timedOut = 1; break; }
+        if ((U & 0xFFFFFULL) == 0xFFFFFULL && nowms_s() > deadline) {
+            timedOut = 1; break;
+        }
     }
 
     /* insertion sort asc por score + serializa (envelope do crack_java). */
@@ -390,9 +431,11 @@ char *mitmRun(const JavaTarget *targets, int n, int maxResults, double deadline)
                            mm[k * 2], mm[k * 2 + 1]);
         off += sprintf(buf + off, "]}");
     }
-    sprintf(buf + off, "],\"checked\":%llu,\"timed_out\":%s,\"threads\":1}",
+    sprintf(buf + off, "],\"checked\":%llu,\"timed_out\":%s,\"threads\":1,"
+                       "\"window\":[%llu,%llu]}",
             (unsigned long long)(N + (timedOut ? 0 : nU)),
-            timedOut ? "true" : "false");
+            timedOut ? "true" : "false",
+            (unsigned long long)startU, (unsigned long long)endU);
     free(oSeed); free(oWorld); free(oScore); free(oIdx);
     for (int i = 0; i < c.nHits; i++) free(c.hits[i].matches);
     free(c.hits); free(ent);

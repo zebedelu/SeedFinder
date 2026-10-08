@@ -445,7 +445,7 @@ SEEDFINDER_API char *seedfinder_crack_java(
      * (span <= 2^33) seguem no SWEEP abaixo. */
     if (tolerance == 0 && (endSeed - startSeed) > (1ULL << 33) &&
         mitmCanRun(targets, n))
-        return mitmRun(targets, n, maxResults, deadline);
+        return mitmRun(targets, n, maxResults, deadline, 0, 1ULL << 24);
 
     if (tolerance == 0 && liftable) {
         /* LIFTING lo19 (inalterado). */
@@ -494,5 +494,22 @@ SEEDFINDER_API char *seedfinder_crack_mitm(
     if (maxResults <= 0 || maxResults > 2000)
         return strdup("{\"error\":\"maxResults must be between 1 and 2000\"}");
     double deadline = (timeBudgetSec > 0.0) ? nowms_s() + timeBudgetSec * 1000.0 : 0.0;
-    return mitmRun(targets, n, maxResults, deadline);
+    return mitmRun(targets, n, maxResults, deadline, 0, 1ULL << 24);
+}
+
+SEEDFINDER_API char *seedfinder_crack_mitm_window(
+    const int *types, int numTypes,
+    const double *xBlocks, const double *zBlocks,
+    int maxResults, double timeBudgetSec, int numThreads,
+    uint64_t startU, uint64_t endU)
+{
+    (void)numThreads;
+    JavaTarget targets[JAVA_MAX_STRUCTURES];
+    int n = 0; char *err = NULL;
+    if (javaTargetsBuild(types, numTypes, xBlocks, zBlocks, 0, targets, &n, &err))
+        return err;
+    if (maxResults <= 0 || maxResults > 2000)
+        return strdup("{\"error\":\"maxResults must be between 1 and 2000\"}");
+    double deadline = (timeBudgetSec > 0.0) ? nowms_s() + timeBudgetSec * 1000.0 : 0.0;
+    return mitmRun(targets, n, maxResults, deadline, startU, endU);
 }

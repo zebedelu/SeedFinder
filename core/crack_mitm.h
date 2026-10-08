@@ -18,7 +18,8 @@ int mitmCanRun(const JavaTarget *targets, int n);
 /* Executa o MITM sobre `targets` (tolerance 0). Verifica com javaCheckSeed
  * sobre TODAS as estruturas. Devolve JSON malloc'd (envelope do crack_java)
  * ou {"error":...}. deadline em ms (0.0 = sem limite). */
-char *mitmRun(const JavaTarget *targets, int n, int maxResults, double deadline);
+char *mitmRun(const JavaTarget *targets, int n, int maxResults, double deadline,
+              uint64_t startU, uint64_t endU);
 
 SEEDFINDER_API char *seedfinder_crack_mitm(
     const int *types, int numTypes,
