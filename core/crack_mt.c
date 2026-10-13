@@ -95,7 +95,13 @@ __attribute__((target("avx2")))
 static void crack_mt_block(const uint32_t seedlo[CRACK_WIDTH], uint32_t cbase,
                            uint32_t out[4][CRACK_WIDTH])
 {
-    crack_vec v[CRACK_GROUPS][401];
+    /* Janela rolante: o init MT so' consome array[0..4] e array[397..400].
+     * Nao guardamos as 401 palavras: prev[g] carrega a cadeia, a[g][0..4] e
+     * b[g][0..3] recebem so' os indices usados. Assim GROUPS alto nao estoura
+     * o cache (ver CRACK_GROUPS em crack_simd.h). Loops sem branch (3 fases). */
+    crack_vec a[CRACK_GROUPS][5];   /* array[0..4]   */
+    crack_vec b[CRACK_GROUPS][4];   /* array[397..400] */
+    crack_vec prev[CRACK_GROUPS];
     const crack_vec mtA   = CV_SPLAT(MT_MATRIX_A);
     const crack_vec upper = CV_SPLAT(MT_UPPER_MASK);
     const crack_vec lower = CV_SPLAT(MT_LOWER_MASK);
@@ -103,24 +109,42 @@ static void crack_mt_block(const uint32_t seedlo[CRACK_WIDTH], uint32_t cbase,
     const crack_vec initA = CV_SPLAT(1812433253U);
     const crack_vec zero  = CV_SPLAT(0);
 
-    /* 8 lanes = 8 seeds por init (AVX2) / 4 lanes por init (WASM SIMD128).
-     * CRACK_GROUPS>1 roda grupos independentes no mesmo laco (ILP). */
-    for (int g = 0; g < CRACK_GROUPS; g++)
-        v[g][0] = CV_ADD(CV_SPLAT(cbase),
+    for (int g = 0; g < CRACK_GROUPS; g++) {
+        prev[g] = CV_ADD(CV_SPLAT(cbase),
                          CV_SEEDS(seedlo + (size_t)g * CRACK_LANES));
-    for (int i = 1; i <= 400; i++) {
+        a[g][0] = prev[g];
+    }
+    for (int i = 1; i <= 4; i++) {
         const crack_vec ci = CV_SPLAT(i);
         for (int g = 0; g < CRACK_GROUPS; g++) {
-            crack_vec prev = v[g][i - 1];
-            crack_vec x = CV_XOR(prev, CV_SHR(prev, 30));
-            v[g][i] = CV_ADD(CV_MUL(initA, x), ci);
+            crack_vec p = prev[g];
+            crack_vec x = CV_XOR(p, CV_SHR(p, 30));
+            crack_vec nx = CV_ADD(CV_MUL(initA, x), ci);
+            prev[g] = nx; a[g][i] = nx;
+        }
+    }
+    for (int i = 5; i <= 396; i++) {
+        const crack_vec ci = CV_SPLAT(i);
+        for (int g = 0; g < CRACK_GROUPS; g++) {
+            crack_vec p = prev[g];
+            crack_vec x = CV_XOR(p, CV_SHR(p, 30));
+            prev[g] = CV_ADD(CV_MUL(initA, x), ci);
+        }
+    }
+    for (int i = 397; i <= 400; i++) {
+        const crack_vec ci = CV_SPLAT(i);
+        for (int g = 0; g < CRACK_GROUPS; g++) {
+            crack_vec p = prev[g];
+            crack_vec x = CV_XOR(p, CV_SHR(p, 30));
+            crack_vec nx = CV_ADD(CV_MUL(initA, x), ci);
+            prev[g] = nx; b[g][i - 397] = nx;
         }
     }
     for (int i = 0; i < 4; i++) {
         for (int g = 0; g < CRACK_GROUPS; g++) {
-            crack_vec y = CV_OR(CV_AND(v[g][i], upper), CV_AND(v[g][i + 1], lower));
+            crack_vec y = CV_OR(CV_AND(a[g][i], upper), CV_AND(a[g][i + 1], lower));
             crack_vec mag = CV_AND(mtA, CV_SUB(zero, CV_AND(y, one)));
-            crack_vec t = CV_XOR(v[g][i + 397], CV_XOR(CV_SHR(y, 1), mag));
+            crack_vec t = CV_XOR(b[g][i], CV_XOR(CV_SHR(y, 1), mag));
             t = CV_XOR(t, CV_SHR(t, 11));
             t = CV_XOR(t, CV_AND(CV_SHL(t, 7), CV_SPLAT(0x9d2c5680U)));
             t = CV_XOR(t, CV_AND(CV_SHL(t, 15), CV_SPLAT(0xefc60000U)));
