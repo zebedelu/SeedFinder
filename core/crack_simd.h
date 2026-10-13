@@ -47,10 +47,21 @@
 #endif
 
 /* Grupos de vetores independentes processados no mesmo laco do init MT.
- * CRACK_GROUPS=1 nao custa nada; subir esconde a latencia de i32x4.mul
- * (ver Task 4 — so mudar depois de medir). */
+ * Subir esconde a latencia do multiply (ILP), mas custa estado vivo por grupo
+ * -> o valor otimo e' por ISA (medido na Fase 1):
+ *   - AVX2 (8 lanes): GROUPS=12-16 -> ~1,5x sobre 4; 20+ regride.
+ *   - WASM SIMD128 (4 lanes): >4 faz spill (prev[] vai para a linear memory)
+ *     e cai para ~0,6x -> manter 4.
+ * Exige a janela rolante de crack_mt_block (com o array [401] o GROUPS alto
+ * nao caberia em cache: GROUPS=16 ficava 0,46x). */
 #ifndef CRACK_GROUPS
-  #define CRACK_GROUPS 4
+  #if CRACK_SIMD && defined(__wasm_simd128__)
+    #define CRACK_GROUPS 4
+  #elif CRACK_SIMD
+    #define CRACK_GROUPS 16
+  #else
+    #define CRACK_GROUPS 1
+  #endif
 #endif
 #define CRACK_WIDTH (CRACK_LANES * CRACK_GROUPS)
 
