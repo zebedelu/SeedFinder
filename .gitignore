@@ -78,9 +78,6 @@ CLAUDE.md
 server/dist/
 server/build_spec/
 
-# WASM intermediário (CMake via emcmake)
-wasm/build/
-
 # superpowers tooling workspace
 .superpowers/
 
@@ -88,4 +85,9 @@ wasm/build/
 ChunkBiomesGUI/ChunkBiomesGUI/
 
 docs/
+
+# WASM tooling workspace — the ENTIRE folder is intentionally untracked: build
+# artifacts (build/, out/), sources, tests and docs (INTEGRATION.md included).
+# Never commit anything under wasm/. The docs/test mirrors live in the private
+# mineseedfinder repo (static/wasm/).
 wasm/
