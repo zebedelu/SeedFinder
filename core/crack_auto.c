@@ -333,7 +333,9 @@ char *seedfinder_crack_auto_lift63(
          * VIÁVEL de menor d² (best-viable, mesma semântica do
          * testCrack64Viable — um irmão mais próximo em bioma morto não pode
          * esconder o verdadeiro). score = soma dos d² escolhidos. */
-        for (uint64_t hi = 0; hi < (1ULL << 15); hi++) {
+        /* hi ateh 2^16: cobre o bit 63 do seed (a metade >= 2^63 e' o signed
+         * negativo) — sem isso um mundo de seed negativa nunca fecha. */
+        for (uint64_t hi = 0; hi < (1ULL << 16); hi++) {
             if (deadline > 0.0 && (checked & 1023ULL) == 0 &&
                 nowms_s() > deadline) { timedOut = 1; break; }
             checked++;
