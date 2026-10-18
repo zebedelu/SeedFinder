@@ -179,10 +179,17 @@ def extrapolate(row, space):
 
 
 def median_rows(rows):
-    """Linha cuja taxa e' a mediana das taxas (empate -> menor tempo)."""
-    rates = sorted(rate(r) for r in rows)
+    """Linha cuja taxa e' a mediana das taxas (empate -> menor tempo).
+
+    Linhas invalidas (taxa 0) nao podem vencer a disputa: com --repeat 3 e duas
+    falhas as taxas ordenam [0, 0, R] e a mediana apontaria para uma falha,
+    jogando fora a unica medicao real. Prefere-se o subconjunto com taxa > 0;
+    so' quando nenhuma mediu nada (todas falharam) cai para o conjunto todo
+    (que devolve a falha, honestamente, em vez de inventar uma taxa)."""
+    pool = [r for r in rows if rate(r) > 0] or rows
+    rates = sorted(rate(r) for r in pool)
     med = rates[len(rates) // 2]
-    return min(rows, key=lambda r: (abs(rate(r) - med), r["elapsed_ms"]))
+    return min(pool, key=lambda r: (abs(rate(r) - med), r["elapsed_ms"]))
 
 
 def _row(runner, fixture, phase, unit, threads, data, elapsed_ms):
@@ -219,6 +226,17 @@ def _timed(fn, *args):
     t0 = time.perf_counter()
     data = _call(fn, *args)
     return data, (time.perf_counter() - t0) * 1000.0
+
+
+# Mensagens do motor que sao um PEDIDO (guard/recusa por falta de ancoras) e nao
+# uma falha de medicao: so' elas viram `skipped`. Qualquer outro RuntimeError
+# (ex.: "returned NULL" num ponteiro perdido) e' falha e vira linha de erro -
+# "skipped" diz "nao havia o que medir", nao "a medicao quebrou".
+_ENGINE_GUARD_MARKERS = ("too many 48-bit candidates",)
+
+
+def _is_engine_guard(message):
+    return any(m in str(message) for m in _ENGINE_GUARD_MARKERS)
 
 
 def _timed_row(runner, fixture, phase, unit, threads, fn, *args, checked=None):
@@ -324,8 +342,17 @@ def run_native(fixture, window, repeat, lib, full=False):
                         p_rank1, 1,
                         j_types, j_x, j_z, j_tol, nj, 2000)
                 except RuntimeError as e:
-                    rank1_data, rank1_row = None, _skip_row(
-                        "native", name, "lift48_rank1", "candidates", threads, str(e))
+                    if _is_engine_guard(e):
+                        rank1_data, rank1_row = None, _skip_row(
+                            "native", name, "lift48_rank1", "candidates", threads,
+                            str(e))
+                    else:
+                        # Falha real (ponteiro NULL, entrada invalida, OOM): nao
+                        # e' ausencia de trabalho. Marca invalida com a mensagem,
+                        # nunca com uma taxa.
+                        rank1_data, rank1_row = None, _error_row(
+                            "native", name, "lift48_rank1", "candidates", threads,
+                            str(e))
                 else:
                     rank1_row = _row("native", name, "lift48_rank1", "candidates",
                                      threads, dict(rank1_data, checked=1), rank1_ms)
@@ -365,6 +392,74 @@ def run_native(fixture, window, repeat, lib, full=False):
     raise ValueError(f"modo desconhecido: {fixture['mode']}")
 
 
+WASM_RUNNER_TIMEOUT = 900.0
+
+
+def _ensure_wasm_esm(out_dir):
+    """Marca wasm/out como ESM para o Node parar de reparsear o bundle.
+
+    O Emscripten emite ESM em wasm/out/ sem package type, entao o Node imprime
+    MODULE_TYPELESS_PACKAGE_JSON e reparseia o arquivo inteiro em todo run. Um
+    package.json {"type":"module"} resolve. Nunca sobrescreve um existente
+    (wasm/ e' untracked: o arquivo fica local). True se criou."""
+    pkg = os.path.join(out_dir, "package.json")
+    if os.path.exists(pkg):
+        return False
+    with open(pkg, "w", encoding="utf-8") as f:
+        f.write('{"type": "module"}\n')
+    return True
+
+
+def run_wasm(fixture, space):
+    """Roda a fixture no build WASM via node. None = sem build/sem node.
+
+    O runner fala JSON em stdout (rows no mesmo formato do lado nativo, com
+    `runner: "wasm"`); logs dele vao para stderr, mostrados so' em falha."""
+    if os.environ.get("SEEDFINDER_BENCH_NO_WASM"):
+        return None
+    js = os.path.join(ROOT, "wasm", "out", "seedfinder.js")
+    runner = os.path.join(ROOT, "server", "bench_wasm.mjs")
+    if not (os.path.isfile(js) and os.path.isfile(runner)):
+        print("  wasm: build ausente (rode wasm/build_wasm.bat) - pulando")
+        return None
+    _ensure_wasm_esm(os.path.dirname(js))
+    os.makedirs(OUT_DIR, exist_ok=True)
+    fx_path = os.path.join(OUT_DIR, "fixtures.json")
+    with open(fx_path, "w", encoding="utf-8") as f:
+        json.dump({"fixtures": [fixture], "space": space}, f)
+    try:
+        out = subprocess.run(["node", runner, "--fixtures", fx_path],
+                             capture_output=True, text=True,
+                             timeout=WASM_RUNNER_TIMEOUT)
+    except FileNotFoundError:
+        print("  wasm: node nao encontrado no PATH - pulando")
+        return None
+    except subprocess.TimeoutExpired:
+        # Timeout e' falha de medicao, nao "build ausente": vira linha invalida
+        # para nao sumir do relatorio nem derrubar os outros runners.
+        print(f"  wasm: runner excedeu {WASM_RUNNER_TIMEOUT:.0f}s - abortado")
+        return [_error_row("wasm", fixture["name"], "runner", "-", 0,
+                           f"runner WASM excedeu {WASM_RUNNER_TIMEOUT:.0f}s")]
+    if out.returncode != 0:
+        print(f"  wasm: runner falhou ({out.returncode}): {out.stderr.strip()[:300]}")
+        return None
+    rows = json.loads(out.stdout)
+    for r in rows:
+        r["space"] = space
+        r["extrapolated_full_ms"] = None
+    return rows
+
+
+def _print_row(name, row):
+    if row.get("error"):
+        print(f"  {name:10s} {row['phase']:12s} ERRO: {row['error']}")
+    elif row.get("skipped"):
+        print(f"  {name:10s} {row['phase']:12s} skipped: {row['note']}")
+    else:
+        print(f"  {name:10s} {row['phase']:12s} {rate(row):14,.0f}/s"
+              f" ({row['checked']} em {row['elapsed_ms'] / 1000.0:.2f}s)")
+
+
 def render_markdown(rows):
     lines = [
         "| runner | fixture | fase | unidade | threads | checked | tempo (s) | taxa/s |",
@@ -387,9 +482,22 @@ def render_markdown(rows):
     return "\n".join(lines) + "\n"
 
 
+def _positive_int(text):
+    """--repeat <= 0 nao e' "sem repeticoes": viraria IndexError/None no
+    median_rows. Recusa na entrada, com mensagem clara."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"esperava um inteiro (recebi {text!r})")
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"precisa ser >= 1 (recebi {text!r})")
+    return value
+
+
 def main():
     ap = argparse.ArgumentParser(description="Benchmark nativo x WASM (F0)")
-    ap.add_argument("--repeat", type=int, default=3)
+    ap.add_argument("--repeat", type=_positive_int, default=3,
+                    help="repeticoes por fase (>= 1)")
     ap.add_argument("--window", type=lambda s: int(s, 0), default=DEFAULT_WINDOW)
     ap.add_argument("--full", action="store_true", help="varre o espaco inteiro")
     ap.add_argument("--wasm", action="store_true", help="inclui o build WASM (node)")
@@ -435,13 +543,19 @@ def main():
             full_ms = extrapolate(row, fx["space"])
             row["extrapolated_full_ms"] = None if full_ms is None else round(full_ms, 1)
             rows.append(row)
-            if row.get("error"):
-                print(f"  {name:10s} {row['phase']:12s} ERRO: {row['error']}")
-            elif row.get("skipped"):
-                print(f"  {name:10s} {row['phase']:12s} skipped: {row['note']}")
-            else:
-                print(f"  {name:10s} {row['phase']:12s} {rate(row):14,.0f}/s"
-                      f" ({row['checked']} em {row['elapsed_ms'] / 1000.0:.2f}s)")
+            _print_row(name, row)
+
+    # WASM so' depois do nativo: os dois lados competem pela mesma CPU, e um
+    # runner lento (ou ausente) nao pode contaminar a medicao nativa.
+    if args.wasm:
+        for name in chosen:
+            fx = bench_fixtures.load(name)
+            space = fx["space"] if args.full else min(args.window, fx["space"])
+            for row in run_wasm(fx, space) or []:
+                row["space"] = space
+                row["extrapolated_full_ms"] = None
+                rows.append(row)
+                _print_row(name, row)
 
     os.makedirs(OUT_DIR, exist_ok=True)
     out_json = args.json or os.path.join(

@@ -1,8 +1,10 @@
 """Testes do benchmark F0 - run with: python server/tests/test_bench.py"""
+import argparse
 import ctypes
 import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -75,6 +77,23 @@ def test_rate_and_median():
     best = bench.median_rows(rows)
     assert best["checked"] == 400 and best["elapsed_ms"] == 2000.0, best
     assert bench.rate(best) == 200.0
+
+
+def test_median_keeps_real_measurement_over_failures():
+    # Taxas [0, 0, R]: a mediana ingênua cai numa falha e joga fora a única
+    # medição real. Prefere-se o subconjunto com taxa > 0.
+    def failed():
+        return {"runner": "native", "checked": 0, "elapsed_ms": 0.0,
+                "timed_out": False, "valid": False, "error": "engine error: boom"}
+
+    real = {"runner": "native", "checked": 1 << 20, "elapsed_ms": 1000.0,
+            "timed_out": False, "valid": True}
+    best = bench.median_rows([failed(), failed(), real])
+    assert best is real, best
+    assert bench.rate(best) == float(1 << 20)
+    # Todas falharam: não há medição a preservar, cai para o conjunto todo.
+    all_bad = [failed(), failed()]
+    assert bench.median_rows(all_bad).get("error"), all_bad
 
 
 def test_extrapolate_refuses_timeout():
@@ -260,18 +279,93 @@ def test_auto_pipeline_runs_lift63_when_s48_present():
     _assert_fixture_tolerances(fake.calls, fx["tolerance"])
 
 
+class _NullRank1Lib(_FakeLib):
+    """Fase 3 devolve NULL (ponteiro perdido): falha real, não pedido de âncoras."""
+
+    def seedfinder_crack_auto_lift48(self, *a):
+        self.calls.append(("lift48", a))
+        if a[6] == 1:            # nLo32 == 1 -> rank-1 (fase 3)
+            return 0
+        return self._ret({"direct32": [], "s48": []})
+
+
+def test_phase3_guard_message_is_skip():
+    fx = bench_fixtures.load("auto64")
+    guard = ("too many 48-bit candidates (3229) - add more Trial Chambers/Trail "
+             "Ruins or enter their corner coordinates more precisely")
+    fake = _FakeLib([5309], [{"s48": []}, {"error": guard}])
+    rows = _run_fake(fx, fake)
+    assert rows[2]["skipped"] is True and "too many 48-bit" in rows[2]["note"], rows[2]
+    assert "skipped" in bench.render_markdown([rows[2]])
+
+
+def test_phase3_null_pointer_is_error_not_skip():
+    fx = bench_fixtures.load("auto64")
+    fake = _NullRank1Lib([5309], [])
+    rows = _run_fake(fx, fake)
+    rank1 = rows[2]
+    assert rank1["phase"] == "lift48_rank1", rank1
+    assert not rank1.get("skipped"), rank1
+    assert rank1["valid"] is False and rank1["checked"] == 0, rank1
+    assert rank1["elapsed_ms"] == 0.0, rank1
+    assert "returned NULL" in rank1["error"], rank1
+    assert bench.rate(rank1) == 0.0
+    # Skip diz "nada a medir"; NULL é falha de medição -> coluna de erro.
+    md = bench.render_markdown([rank1])
+    assert "**erro:" in md and "skipped" not in md, md
+
+
+def test_repeat_must_be_positive():
+    assert bench._positive_int("3") == 3
+    for bad in ("0", "-2"):
+        try:
+            bench._positive_int(bad)
+        except argparse.ArgumentTypeError as e:
+            assert ">= 1" in str(e), e
+        else:
+            raise AssertionError(f"--repeat {bad} deveria ser recusado com mensagem")
+
+
+def test_wasm_out_gets_esm_package_json():
+    with tempfile.TemporaryDirectory() as tmp:
+        assert bench._ensure_wasm_esm(tmp) is True
+        pkg = os.path.join(tmp, "package.json")
+        with open(pkg, encoding="utf-8") as f:
+            assert json.load(f) == {"type": "module"}
+        # Um package.json existente nunca é sobrescrito.
+        with open(pkg, "w", encoding="utf-8") as f:
+            f.write('{"type": "commonjs"}')
+        assert bench._ensure_wasm_esm(tmp) is False
+        with open(pkg, encoding="utf-8") as f:
+            assert json.load(f) == {"type": "commonjs"}
+
+
+def test_wasm_runner_degrades_without_build():
+    os.environ["SEEDFINDER_BENCH_NO_WASM"] = "1"
+    try:
+        assert bench.run_wasm({"name": "bedrock32"}, 1 << 26) is None
+    finally:
+        del os.environ["SEEDFINDER_BENCH_NO_WASM"]
+
+
 def main():
     for fn in (test_names_and_shape, test_bedrock32_fixture,
                test_auto64_fixture_has_anchor, test_java_mitm_fixture,
                test_validate_and_unknown_name, test_load_returns_isolated_copy,
                test_auto64_has_engine_minimum_mt, test_rate_and_median,
+               test_median_keeps_real_measurement_over_failures,
                test_extrapolate_refuses_timeout, test_rate_zero_when_no_elapsed,
                test_render_marks_invalid_rows, test_render_shows_engine_error,
                test_staleness_warnings, test_native_runner_requires_symbols,
                test_call_raises_on_engine_error,
                test_phase_error_row_has_no_fake_rate,
                test_auto_pipeline_skips_lift63_without_s48,
-               test_auto_pipeline_runs_lift63_when_s48_present):
+               test_auto_pipeline_runs_lift63_when_s48_present,
+               test_phase3_guard_message_is_skip,
+               test_phase3_null_pointer_is_error_not_skip,
+               test_repeat_must_be_positive,
+               test_wasm_out_gets_esm_package_json,
+               test_wasm_runner_degrades_without_build):
         fn()
         print(f"  ok  {fn.__name__}")
     print("test_bench (fixtures): OK")
