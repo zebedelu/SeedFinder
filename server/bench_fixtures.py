@@ -13,7 +13,10 @@ import copy
 # 1. 32-bit Bedrock: mesmas coords de wasm/test_wasm.mjs:11-15 e
 #    server/tests/test_native_crack.py:33-38 (Chunkbase, seed 8675309).
 # 2. 64-bit Bedrock: server/tests/fixtures_crack64.json (Chunkbase 26.0,
-#    seed 4294972605; lo32 = 5309, confirmado em test_crack_auto.py).
+#    seed 4294972605; lo32 = 5309, confirmado em test_crack_auto.py). As duas
+#    MT extra (tipos 1 e 3) saem do all_data.extra_mt do mesmo arquivo
+#    (probe "recovers") e existem so porque o engine exige >= 4 estruturas
+#    (core/crack_mt.c:361); sem elas o modo auto e' imensuravel.
 # 3. Java/MITM: mesmas coords de wasm/test_mitm.mjs:39-41 (bug report
 #    seed 4294967300 = 2^32 + 4; U = seed >> 24 = 256).
 FIXTURES = {
@@ -42,6 +45,8 @@ FIXTURES = {
         "mt_structures": [
             {"type": 4, "x": -280, "z": 104},
             {"type": 2, "x": 2584, "z": -1288},
+            {"type": 1, "x": -3048, "z": -296},
+            {"type": 3, "x": 2136, "z": -280},
         ],
         "java_structures": [
             {"type": 24, "x": -505, "z": -281},
@@ -49,7 +54,9 @@ FIXTURES = {
             {"type": 24, "x": -359, "z": 199},
             {"type": 24, "x": 231, "z": 169},
         ],
-        "source": "Chunkbase 26.0; server/tests/fixtures_crack64.json",
+        "source": ("Chunkbase 26.0; server/tests/fixtures_crack64.json "
+                   "(+2 MT de all_data.extra_mt - tipos 1 e 3 - para satisfazer "
+                   "o minimo de 4 estruturas do engine)"),
     },
     "java_mitm": {
         "name": "java_mitm",

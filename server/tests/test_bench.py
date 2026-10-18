@@ -1,4 +1,5 @@
 """Testes do benchmark F0 - run with: python server/tests/test_bench.py"""
+import ctypes
 import os
 import sys
 
@@ -107,12 +108,66 @@ def test_native_runner_requires_symbols():
         raise AssertionError("lib sem simbolos deveria falhar com mensagem clara")
 
 
+def test_auto64_has_engine_minimum_mt():
+    # crackTargetsBuild exige >= 4 estruturas (core/crack_mt.c:361); com 2 o
+    # modo auto devolve {"error":...} e nenhuma fase e' mensuravel.
+    fx = bench_fixtures.load("auto64")
+    assert len(fx["mt_structures"]) >= 4, fx["mt_structures"]
+    coords = {(s["type"], s["x"], s["z"]) for s in fx["mt_structures"]}
+    assert {(1, -3048, -296), (3, 2136, -280)} <= coords, coords
+
+
+def test_rate_zero_when_no_elapsed():
+    assert bench.rate({"checked": 10, "elapsed_ms": 0.0}) == 0.0
+    assert bench.rate({"checked": 10, "elapsed_ms": -1.0}) == 0.0
+    cut = {"checked": 0, "elapsed_ms": 0.0, "timed_out": False}
+    assert bench.extrapolate(cut, 1 << 32) is None
+
+
+def test_call_raises_on_engine_error():
+    buf = ctypes.create_string_buffer(b'{"error":"at least 4 structures are required"}')
+    ptr = ctypes.cast(buf, ctypes.c_void_p).value
+    orig = bench.lib_free
+    bench.lib_free = lambda _p: None
+    try:
+        try:
+            bench._call(lambda *a: ptr)
+        except RuntimeError as e:
+            assert "at least 4 structures" in str(e), e
+        else:
+            raise AssertionError("erro do engine deveria virar RuntimeError")
+    finally:
+        bench.lib_free = orig
+
+
+def test_phase_error_row_has_no_fake_rate():
+    def boom(*a):
+        raise RuntimeError("engine error: at least 4 structures are required")
+    data, row = bench._timed_row("native", "auto64", "sweep", "seeds", 5, boom)
+    assert data is None, data
+    assert row["valid"] is False and row["checked"] == 0 and row["elapsed_ms"] == 0.0, row
+    assert "at least 4 structures" in row["error"], row
+    assert bench.rate(row) == 0.0
+
+
+def test_render_shows_engine_error():
+    rows = [{"runner": "native", "fixture": "auto64", "phase": "sweep", "unit": "seeds",
+             "threads": 5, "checked": 0, "elapsed_ms": 0.0, "rate": 0.0,
+             "timed_out": False, "valid": False,
+             "error": "engine error: at least 4 structures are required"}]
+    md = bench.render_markdown(rows)
+    assert "**erro: engine error: at least 4 structures are required**" in md, md
+
+
 def main():
     for fn in (test_names_and_shape, test_bedrock32_fixture,
                test_auto64_fixture_has_anchor, test_java_mitm_fixture,
                test_validate_and_unknown_name, test_load_returns_isolated_copy,
-               test_rate_and_median, test_extrapolate_refuses_timeout,
-               test_render_marks_invalid_rows, test_native_runner_requires_symbols):
+               test_auto64_has_engine_minimum_mt, test_rate_and_median,
+               test_extrapolate_refuses_timeout, test_rate_zero_when_no_elapsed,
+               test_render_marks_invalid_rows, test_render_shows_engine_error,
+               test_native_runner_requires_symbols, test_call_raises_on_engine_error,
+               test_phase_error_row_has_no_fake_rate):
         fn()
         print(f"  ok  {fn.__name__}")
     print("test_bench (fixtures): OK")

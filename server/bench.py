@@ -15,7 +15,6 @@ import ctypes
 import json
 import os
 import platform
-import statistics
 import subprocess
 import sys
 import time
@@ -133,9 +132,14 @@ def _call(fn, *args):
     if not ptr:
         raise RuntimeError(f"{fn.__name__} returned NULL")
     try:
-        return json.loads(ctypes.string_at(ptr).decode("utf-8"))
+        data = json.loads(ctypes.string_at(ptr).decode("utf-8"))
     finally:
         lib_free(ptr)
+    # Erro do engine ({"error":...}) nao e' resultado: um leitor poderia confundir
+    # com uma fase lenta. Propaga como excecao para virar linha invalida, nunca taxa.
+    if isinstance(data, dict) and "error" in data:
+        raise RuntimeError(f"engine error: {data['error']}")
+    return data
 
 
 _lib_handle = None
@@ -155,7 +159,10 @@ def _arrays(structures):
 
 
 def rate(row):
-    return row["checked"] / (row["elapsed_ms"] / 1000.0)
+    elapsed_ms = row["elapsed_ms"]
+    if elapsed_ms <= 0:
+        return 0.0
+    return row["checked"] / (elapsed_ms / 1000.0)
 
 
 def extrapolate(row, space):
@@ -186,10 +193,33 @@ def _row(runner, fixture, phase, unit, threads, data, elapsed_ms):
     }
 
 
+def _error_row(runner, fixture, phase, unit, threads, message):
+    """Fase que o engine recusou: sem taxa e sem tempo (nao houve trabalho
+    medido), so a mensagem, marcada invalida."""
+    return {
+        "runner": runner, "fixture": fixture, "phase": phase, "unit": unit,
+        "threads": threads, "checked": 0, "elapsed_ms": 0.0,
+        "timed_out": False, "valid": False, "error": message,
+    }
+
+
 def _timed(fn, *args):
     t0 = time.perf_counter()
     data = _call(fn, *args)
     return data, (time.perf_counter() - t0) * 1000.0
+
+
+def _timed_row(runner, fixture, phase, unit, threads, fn, *args, checked=None):
+    """Roda uma fase e devolve (dados, linha). Erro do engine vira linha
+    invalida (nunca uma taxa plausivel); `checked` sobrepoe o valor do JSON
+    quando a fase nao o reporta (lift48, mitm)."""
+    try:
+        data, ms = _timed(fn, *args)
+    except RuntimeError as e:
+        return None, _error_row(runner, fixture, phase, unit, threads, str(e))
+    if checked is not None:
+        data = dict(data, checked=checked)
+    return data, _row(runner, fixture, phase, unit, threads, data, ms)
 
 
 def run_native(fixture, window, repeat, lib, full=False):
@@ -199,11 +229,12 @@ def run_native(fixture, window, repeat, lib, full=False):
     rows = []
 
     if fixture["mode"] == "bedrock32":
-        n, types, xs, zs, tols = _arrays(fixture["structures"])
+        n, types, xs, zs, _ = _arrays(fixture["structures"])
         for _ in range(repeat):
-            data, ms = _timed(lib.seedfinder_crack, types, n, xs, zs,
-                              fixture["tolerance"], 0, window, 2000, FULL_BUDGET, threads)
-            rows.append(_row("native", name, "crack32", "seeds", threads, data, ms))
+            _, row = _timed_row("native", name, "crack32", "seeds", threads,
+                                lib.seedfinder_crack, types, n, xs, zs,
+                                fixture["tolerance"], 0, window, 2000, FULL_BUDGET, threads)
+            rows.append(row)
         return [median_rows(rows)]
 
     if fixture["mode"] == "auto":
@@ -213,29 +244,26 @@ def run_native(fixture, window, repeat, lib, full=False):
         nj, j_types, j_x, j_z, j_tol = _arrays(jv)
         best = None
         for _ in range(repeat):
-            sweep, sweep_ms = _timed(lib.seedfinder_crack_auto_sweep,
-                                     mt_types, nmt, mt_x, mt_z, mt_tol,
-                                     0, window, 2000, FULL_BUDGET, threads)
-            lo32 = [r["seed"] for r in sweep.get("results", [])[:2000]]
+            sweep, sweep_row = _timed_row("native", name, "sweep", "seeds", threads,
+                                          lib.seedfinder_crack_auto_sweep,
+                                          mt_types, nmt, mt_x, mt_z, mt_tol,
+                                          0, window, 2000, FULL_BUDGET, threads)
+            lo32 = [r["seed"] for r in (sweep or {}).get("results", [])[:2000]]
             p_lo = (ctypes.c_uint64 * max(1, len(lo32)))(*lo32)
-            s48_data, s48_ms = _timed(lib.seedfinder_crack_auto_lift48,
-                                      mt_types, mt_x, mt_z, mt_tol, nmt,
-                                      p_lo, len(lo32),
-                                      j_types, j_x, j_z, j_tol, nj, 2000)
-            s48 = s48_data.get("s48", [])
+            s48_data, s48_row = _timed_row("native", name, "lift48", "candidates", threads,
+                                           lib.seedfinder_crack_auto_lift48,
+                                           mt_types, mt_x, mt_z, mt_tol, nmt,
+                                           p_lo, len(lo32),
+                                           j_types, j_x, j_z, j_tol, nj, 2000,
+                                           checked=len(lo32))
+            s48 = (s48_data or {}).get("s48", [])
             p_s48 = (ctypes.c_uint64 * max(1, len(s48)))(*s48)
-            lift63, lift63_ms = _timed(lib.seedfinder_crack_auto_lift63,
+            _, lift63_row = _timed_row("native", name, "lift63", "hi", threads,
+                                       lib.seedfinder_crack_auto_lift63,
                                        p_s48, len(s48),
                                        mt_types, mt_x, mt_z, mt_tol, nmt,
                                        j_types, j_x, j_z, j_tol, nj, 2000, FULL_BUDGET)
-            run = [
-                _row("native", name, "sweep", "seeds", threads, sweep, sweep_ms),
-                _row("native", name, "lift48", "candidates", threads,
-                     {"checked": len(lo32), "timed_out": False}, s48_ms),
-                _row("native", name, "lift63", "hi", threads,
-                     {"checked": lift63.get("checked", 0),
-                      "timed_out": lift63.get("timed_out")}, lift63_ms),
-            ]
+            run = [sweep_row, s48_row, lift63_row]
             if best is None or rate(run[0]) > rate(best[0]):
                 best = run
         return best
@@ -247,11 +275,11 @@ def run_native(fixture, window, repeat, lib, full=False):
         # uniforme numa janela isenta de acerto.
         start_u, end_u = ((0, 1 << 24) if full else fixture["u_timing"])
         for _ in range(repeat):
-            data, ms = _timed(lib.seedfinder_crack_mitm_window,
-                              types, n, xs, zs, 50, FULL_BUDGET, 1, start_u, end_u)
-            rows.append(_row("native", name, "mitm", "u", 1,
-                             {"checked": end_u - start_u,
-                              "timed_out": data.get("timed_out")}, ms))
+            _, row = _timed_row("native", name, "mitm", "u", 1,
+                                lib.seedfinder_crack_mitm_window,
+                                types, n, xs, zs, 50, FULL_BUDGET, 1, start_u, end_u,
+                                checked=end_u - start_u)
+            rows.append(row)
         return [median_rows(rows)]
 
     raise ValueError(f"modo desconhecido: {fixture['mode']}")
@@ -263,11 +291,16 @@ def render_markdown(rows):
         "|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
-        mark = "" if r.get("valid") else " **parcial**"
+        if r.get("error"):
+            rate_cell = f"**erro: {r['error']}**"
+        else:
+            rate_cell = f"{rate(r):,.0f}"
+            if not r.get("valid"):
+                rate_cell += " **parcial**"
         lines.append(
             f"| {r['runner']} | {r['fixture']} | {r['phase']} | {r['unit']} | "
             f"{r['threads']} | {r['checked']} | {r['elapsed_ms'] / 1000.0:.2f} | "
-            f"{rate(r):,.0f}{mark} |"
+            f"{rate_cell} |"
         )
     return "\n".join(lines) + "\n"
 
@@ -323,8 +356,11 @@ def main():
             full_ms = extrapolate(row, fx["space"])
             row["extrapolated_full_ms"] = None if full_ms is None else round(full_ms, 1)
             rows.append(row)
-            print(f"  {name:10s} {row['phase']:8s} {rate(row):14,.0f}/s"
-                  f" ({row['checked']} em {row['elapsed_ms'] / 1000.0:.2f}s)")
+            if row.get("error"):
+                print(f"  {name:10s} {row['phase']:8s} ERRO: {row['error']}")
+            else:
+                print(f"  {name:10s} {row['phase']:8s} {rate(row):14,.0f}/s"
+                      f" ({row['checked']} em {row['elapsed_ms'] / 1000.0:.2f}s)")
 
     os.makedirs(OUT_DIR, exist_ok=True)
     out_json = args.json or os.path.join(
