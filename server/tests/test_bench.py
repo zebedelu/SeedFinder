@@ -4,6 +4,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from server import bench  # noqa: E402
 from server import bench_fixtures  # noqa: E402
 
 
@@ -54,10 +55,64 @@ def test_validate_and_unknown_name():
         raise AssertionError("load() deveria levantar KeyError")
 
 
+def test_load_returns_isolated_copy():
+    fx = bench_fixtures.load("bedrock32")
+    fx["structures"].pop()
+    fx["name"] = "corrompido"
+    assert len(bench_fixtures.load("bedrock32")["structures"]) == 4
+    assert bench_fixtures.load("bedrock32")["name"] == "bedrock32"
+
+
+def test_rate_and_median():
+    rows = [
+        {"runner": "native", "checked": 100, "elapsed_ms": 1000.0, "timed_out": False},  # 100/s
+        {"runner": "native", "checked": 400, "elapsed_ms": 1000.0, "timed_out": False},  # 400/s
+        {"runner": "native", "checked": 400, "elapsed_ms": 2000.0, "timed_out": False},  # 200/s
+    ]
+    assert bench.rate(rows[0]) == 100.0
+    best = bench.median_rows(rows)
+    assert best["checked"] == 400 and best["elapsed_ms"] == 2000.0, best
+    assert bench.rate(best) == 200.0
+
+
+def test_extrapolate_refuses_timeout():
+    ok = {"checked": 1 << 20, "elapsed_ms": 1000.0, "timed_out": False}
+    assert bench.extrapolate(ok, 1 << 32) == 4096.0 * 1000.0
+    cut = dict(ok, timed_out=True)
+    assert bench.extrapolate(cut, 1 << 32) is None
+
+
+def test_render_marks_invalid_rows():
+    rows = [
+        {"runner": "native", "fixture": "bedrock32", "phase": "crack32", "unit": "seeds",
+         "threads": 7, "checked": 1 << 20, "elapsed_ms": 1000.0, "rate": 1048576.0,
+         "timed_out": False, "valid": True},
+        {"runner": "wasm", "fixture": "bedrock32", "phase": "crack32", "unit": "seeds",
+         "threads": 1, "checked": 1 << 18, "elapsed_ms": 4000.0, "rate": 65536.0,
+         "timed_out": True, "valid": False},
+    ]
+    md = bench.render_markdown(rows)
+    assert "| bedrock32 | crack32 |" in md
+    assert "parcial" in md, "linha com timed_out tem de ser marcada, nao somada"
+
+
+def test_native_runner_requires_symbols():
+    class FakeLib:
+        pass
+    try:
+        bench._bind(FakeLib())
+    except RuntimeError as e:
+        assert "seedfinder_crack" in str(e)
+    else:
+        raise AssertionError("lib sem simbolos deveria falhar com mensagem clara")
+
+
 def main():
     for fn in (test_names_and_shape, test_bedrock32_fixture,
                test_auto64_fixture_has_anchor, test_java_mitm_fixture,
-               test_validate_and_unknown_name):
+               test_validate_and_unknown_name, test_load_returns_isolated_copy,
+               test_rate_and_median, test_extrapolate_refuses_timeout,
+               test_render_marks_invalid_rows, test_native_runner_requires_symbols):
         fn()
         print(f"  ok  {fn.__name__}")
     print("test_bench (fixtures): OK")

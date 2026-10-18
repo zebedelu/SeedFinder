@@ -8,6 +8,8 @@ NAO e a tabela da verdade do produto. Dados reais de campo vivem so no repo
 privado (../mineseedfinder/static/wasm/ground_truth.json).
 """
 
+import copy
+
 # 1. 32-bit Bedrock: mesmas coords de wasm/test_wasm.mjs:11-15 e
 #    server/tests/test_native_crack.py:33-38 (Chunkbase, seed 8675309).
 # 2. 64-bit Bedrock: server/tests/fixtures_crack64.json (Chunkbase 26.0,
@@ -82,7 +84,7 @@ def names():
 def load(name):
     if name not in FIXTURES:
         raise KeyError(f"fixture desconhecida: {name!r} (tenho: {names()})")
-    return FIXTURES[name]
+    return copy.deepcopy(FIXTURES[name])
 
 
 def _structures(fx):
