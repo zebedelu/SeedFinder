@@ -1,5 +1,6 @@
 """Testes do benchmark F0 - run with: python server/tests/test_bench.py"""
 import ctypes
+import json
 import os
 import sys
 
@@ -159,6 +160,106 @@ def test_render_shows_engine_error():
     assert "**erro: engine error: at least 4 structures are required**" in md, md
 
 
+def test_staleness_warnings():
+    stale = bench.staleness_warnings(1.0, 2.0)
+    assert len(stale) == 1 and "seedfinder_lib.dll" in stale[0], stale
+    assert bench.staleness_warnings(2.0, 1.0) == []
+    both = bench.staleness_warnings(1.0, 2.0, wasm_mtime=1.5)
+    assert len(both) == 2 and any("wasm/out" in m for m in both), both
+    assert len(bench.staleness_warnings(1.0, 2.0, wasm_mtime=3.0)) == 1
+
+
+class _FakeLib:
+    """Lib falsa: devolve JSON por ponteiro e registra as chamadas (sem DLL)."""
+
+    def __init__(self, sweep_results, lift48_seq):
+        self.calls = []
+        self._bufs = []
+        self._sweep_results = sweep_results
+        self._lift48_seq = list(lift48_seq)
+
+    def _ret(self, obj):
+        buf = ctypes.create_string_buffer(json.dumps(obj).encode("utf-8"))
+        self._bufs.append(buf)  # mantem vivo ate o string_at do _call
+        return ctypes.cast(buf, ctypes.c_void_p).value
+
+    def seedfinder_crack_auto_sweep(self, *a):
+        self.calls.append(("sweep", a))
+        return self._ret({"results": [{"seed": s, "score": i}
+                                      for i, s in enumerate(self._sweep_results)],
+                          "checked": 1 << 20, "timed_out": False, "threads": 4})
+
+    def seedfinder_crack_auto_lift48(self, *a):
+        self.calls.append(("lift48", a))
+        return self._ret(self._lift48_seq.pop(0))
+
+    def seedfinder_crack_auto_lift63(self, *a):
+        self.calls.append(("lift63", a))
+        return self._ret({"results": [], "checked": 1, "timed_out": False})
+
+    def seedfinder_free_result(self, ptr):
+        pass
+
+
+def _run_fake(fx, fake):
+    orig = bench._lib_handle
+    bench._lib_handle = fake
+    try:
+        return bench.run_native(fx, 1 << 20, 1, fake, full=False)
+    finally:
+        bench._lib_handle = orig
+
+
+def _assert_non_empty_arrays(calls):
+    for name, args in calls:
+        if name == "sweep":
+            assert args[1] > 0, (name, args[1])
+        elif name == "lift48":
+            assert args[6] > 0 and len(args[5]) == args[6], (name, args[6])
+        else:  # lift63
+            assert args[1] > 0 and len(args[0]) == args[1], (name, args[1])
+
+
+def _assert_fixture_tolerances(calls, tol):
+    for name, args in calls:
+        if name == "sweep":
+            assert all(t == tol for t in args[4]), list(args[4])
+        elif name == "lift48":
+            assert all(t == tol for t in args[3]), list(args[3])
+            assert all(t == tol for t in args[10]), list(args[10])
+
+
+def test_auto_pipeline_skips_lift63_without_s48():
+    fx = bench_fixtures.load("auto64")
+    guard = ("engine error: too many 48-bit candidates (3229) - add more Trial "
+             "Chambers/Trail Ruins or enter their corner coordinates more precisely")
+    fake = _FakeLib([5309, 41840], [{"direct32": [], "s48": []},
+                                    {"error": guard[len("engine error: "):]}])
+    rows = _run_fake(fx, fake)
+    assert [r["phase"] for r in rows] == ["sweep", "lift48", "lift48_rank1", "lift63"]
+    assert rows[0]["found_lo32"] is True, rows[0]
+    assert rows[0]["top_seeds"] == ["5309", "41840"], rows[0]
+    assert "contrato" in rows[1]["note"], rows[1]
+    assert rows[2]["skipped"] is True and "too many 48-bit" in rows[2]["note"], rows[2]
+    assert rows[3]["skipped"] is True, rows[3]
+    assert [c[0] for c in fake.calls] == ["sweep", "lift48", "lift48"], fake.calls
+    nlo32 = [c[1][6] for c in fake.calls if c[0] == "lift48"]
+    assert nlo32 == [2, 1], nlo32  # fase 2 = lista inteira; fase 3 = rank-1
+    _assert_non_empty_arrays(fake.calls)
+    _assert_fixture_tolerances(fake.calls, fx["tolerance"])
+
+
+def test_auto_pipeline_runs_lift63_when_s48_present():
+    fx = bench_fixtures.load("auto64")
+    fake = _FakeLib([5309], [{"s48": [5309]}, {"s48": [4294967296]}])
+    rows = _run_fake(fx, fake)
+    assert [r["phase"] for r in rows] == ["sweep", "lift48", "lift48_rank1", "lift63"]
+    assert not rows[3].get("skipped"), rows[3]
+    assert [c[0] for c in fake.calls] == ["sweep", "lift48", "lift48", "lift63"]
+    _assert_non_empty_arrays(fake.calls)
+    _assert_fixture_tolerances(fake.calls, fx["tolerance"])
+
+
 def main():
     for fn in (test_names_and_shape, test_bedrock32_fixture,
                test_auto64_fixture_has_anchor, test_java_mitm_fixture,
@@ -166,8 +267,11 @@ def main():
                test_auto64_has_engine_minimum_mt, test_rate_and_median,
                test_extrapolate_refuses_timeout, test_rate_zero_when_no_elapsed,
                test_render_marks_invalid_rows, test_render_shows_engine_error,
-               test_native_runner_requires_symbols, test_call_raises_on_engine_error,
-               test_phase_error_row_has_no_fake_rate):
+               test_staleness_warnings, test_native_runner_requires_symbols,
+               test_call_raises_on_engine_error,
+               test_phase_error_row_has_no_fake_rate,
+               test_auto_pipeline_skips_lift63_without_s48,
+               test_auto_pipeline_runs_lift63_when_s48_present):
         fn()
         print(f"  ok  {fn.__name__}")
     print("test_bench (fixtures): OK")

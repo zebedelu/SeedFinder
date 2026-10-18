@@ -149,12 +149,14 @@ def lib_free(ptr):
     _lib_handle.seedfinder_free_result(ptr)
 
 
-def _arrays(structures):
+def _arrays(structures, default_tol=0):
     n = len(structures)
     types = (ctypes.c_int * n)(*[s["type"] for s in structures])
     xs = (ctypes.c_double * n)(*[float(s["x"]) for s in structures])
     zs = (ctypes.c_double * n)(*[float(s["z"]) for s in structures])
-    tols = (ctypes.c_int * n)(*[s.get("tolerance", 0) for s in structures])
+    # Tolerancia por estrutura; sem chave propria herda a do fixture (o modo
+    # auto usa ponteiros, nao o escalar do seedfinder_crack).
+    tols = (ctypes.c_int * n)(*[s.get("tolerance", default_tol) for s in structures])
     return n, types, xs, zs, tols
 
 
@@ -203,6 +205,16 @@ def _error_row(runner, fixture, phase, unit, threads, message):
     }
 
 
+def _skip_row(runner, fixture, phase, unit, threads, message):
+    """Fase que nao roda (entrada vazia por contrato, ou guard do motor pedindo
+    mais ancoras): nao e' taxa nem erro do bench - e' ausencia de medicao."""
+    return {
+        "runner": runner, "fixture": fixture, "phase": phase, "unit": unit,
+        "threads": threads, "checked": 0, "elapsed_ms": 0.0,
+        "timed_out": False, "valid": False, "skipped": True, "note": message,
+    }
+
+
 def _timed(fn, *args):
     t0 = time.perf_counter()
     data = _call(fn, *args)
@@ -220,6 +232,28 @@ def _timed_row(runner, fixture, phase, unit, threads, fn, *args, checked=None):
     if checked is not None:
         data = dict(data, checked=checked)
     return data, _row(runner, fixture, phase, unit, threads, data, ms)
+
+
+def newest_core_mtime():
+    """mtime mais recente das fontes do motor (base do aviso de artefato velho)."""
+    core = os.path.join(ROOT, "core")
+    return max(os.path.getmtime(os.path.join(core, f))
+               for f in os.listdir(core) if f.endswith((".c", ".h")))
+
+
+def staleness_warnings(dll_mtime, core_mtime, wasm_mtime=None):
+    """Avisos de artefato mais antigo que core/. Pura (sem FS) para ser testavel.
+
+    Um build nativo velho invalida os numeros: em 18/10 a ABI de
+    auto_sweep/lift48/lift63 mudou (commit 980b406) e a DLL de 13/10 fazia o
+    auto64 falhar inteiro sem aviso."""
+    out = []
+    if dll_mtime < core_mtime:
+        out.append("AVISO: build_server/seedfinder_lib.dll mais antigo que core/ - "
+                   "rode server\\start.bat antes de confiar nestes numeros")
+    if wasm_mtime is not None and wasm_mtime < core_mtime:
+        out.append("AVISO: wasm/out mais antigo que core/ - rode wasm/build_wasm.bat")
+    return out
 
 
 def run_native(fixture, window, repeat, lib, full=False):
@@ -240,30 +274,76 @@ def run_native(fixture, window, repeat, lib, full=False):
     if fixture["mode"] == "auto":
         mt = fixture["mt_structures"]
         jv = fixture["java_structures"]
-        nmt, mt_types, mt_x, mt_z, mt_tol = _arrays(mt)
-        nj, j_types, j_x, j_z, j_tol = _arrays(jv)
+        nmt, mt_types, mt_x, mt_z, mt_tol = _arrays(mt, fixture["tolerance"])
+        nj, j_types, j_x, j_z, j_tol = _arrays(jv, fixture["tolerance"])
+        true_lo32 = fixture["seed"] & 0xFFFFFFFF
         best = None
         for _ in range(repeat):
+            # Fase 1: sweep ranqueado (placement-only).
             sweep, sweep_row = _timed_row("native", name, "sweep", "seeds", threads,
                                           lib.seedfinder_crack_auto_sweep,
                                           mt_types, nmt, mt_x, mt_z, mt_tol,
                                           0, window, 2000, FULL_BUDGET, threads)
-            lo32 = [r["seed"] for r in (sweep or {}).get("results", [])[:2000]]
-            p_lo = (ctypes.c_uint64 * max(1, len(lo32)))(*lo32)
-            s48_data, s48_row = _timed_row("native", name, "lift48", "candidates", threads,
-                                           lib.seedfinder_crack_auto_lift48,
+            results = (sweep or {}).get("results", []) if sweep else []
+            lo32 = [r["seed"] for r in results[:2000]]
+            if sweep is not None:
+                sweep_row["top_seeds"] = [str(s) for s in lo32[:5]]
+                sweep_row["found_lo32"] = true_lo32 in lo32
+
+            # Fase 2: lift48 com a LISTA. nLo32 > 1 => s48 vazio POR CONTRATO
+            # (core/crack_auto.h:29-37); serve para direct32, nao alimenta lift63.
+            if not lo32:
+                s48_data, s48_row = None, _skip_row(
+                    "native", name, "lift48", "candidates", threads,
+                    "sweep sem candidatos lo32 - fase 2 nao roda")
+            else:
+                p_lo = (ctypes.c_uint64 * len(lo32))(*lo32)
+                s48_data, s48_row = _timed_row(
+                    "native", name, "lift48", "candidates", threads,
+                    lib.seedfinder_crack_auto_lift48,
+                    mt_types, mt_x, mt_z, mt_tol, nmt,
+                    p_lo, len(lo32),
+                    j_types, j_x, j_z, j_tol, nj, 2000,
+                    checked=len(lo32))
+                if len(lo32) > 1:
+                    s48_row["note"] = ("s48 vazio por contrato (nLo32 > 1): "
+                                       "a fase 2 so' produz direct32")
+
+            # Fase 3: lift48 com rank-1 - e' aqui que o lift Java roda. O guard
+            # de 1024 candidatos e' um pedido de mais ancoras, nao falha: skip.
+            if not lo32:
+                rank1_data, rank1_row = None, _skip_row(
+                    "native", name, "lift48_rank1", "candidates", threads,
+                    "sweep sem candidatos lo32 - sem rank-1")
+            else:
+                p_rank1 = (ctypes.c_uint64 * 1)(lo32[0])
+                try:
+                    rank1_data, rank1_ms = _timed(
+                        lib.seedfinder_crack_auto_lift48,
+                        mt_types, mt_x, mt_z, mt_tol, nmt,
+                        p_rank1, 1,
+                        j_types, j_x, j_z, j_tol, nj, 2000)
+                except RuntimeError as e:
+                    rank1_data, rank1_row = None, _skip_row(
+                        "native", name, "lift48_rank1", "candidates", threads, str(e))
+                else:
+                    rank1_row = _row("native", name, "lift48_rank1", "candidates",
+                                     threads, dict(rank1_data, checked=1), rank1_ms)
+
+            # Fase 4: lift63 so' roda com o s48 da fase 3 - nunca com array vazio.
+            s48 = (rank1_data or {}).get("s48", [])
+            if not s48:
+                lift63_row = _skip_row("native", name, "lift63", "hi", threads,
+                                       "sem s48 da fase 3 - lift63 nao roda")
+            else:
+                p_s48 = (ctypes.c_uint64 * len(s48))(*s48)
+                _, lift63_row = _timed_row("native", name, "lift63", "hi", threads,
+                                           lib.seedfinder_crack_auto_lift63,
+                                           p_s48, len(s48),
                                            mt_types, mt_x, mt_z, mt_tol, nmt,
-                                           p_lo, len(lo32),
-                                           j_types, j_x, j_z, j_tol, nj, 2000,
-                                           checked=len(lo32))
-            s48 = (s48_data or {}).get("s48", [])
-            p_s48 = (ctypes.c_uint64 * max(1, len(s48)))(*s48)
-            _, lift63_row = _timed_row("native", name, "lift63", "hi", threads,
-                                       lib.seedfinder_crack_auto_lift63,
-                                       p_s48, len(s48),
-                                       mt_types, mt_x, mt_z, mt_tol, nmt,
-                                       j_types, j_x, j_z, j_tol, nj, 2000, FULL_BUDGET)
-            run = [sweep_row, s48_row, lift63_row]
+                                           j_types, j_x, j_z, j_tol, nj, 2000, FULL_BUDGET)
+
+            run = [sweep_row, s48_row, rank1_row, lift63_row]
             if best is None or rate(run[0]) > rate(best[0]):
                 best = run
         return best
@@ -293,6 +373,8 @@ def render_markdown(rows):
     for r in rows:
         if r.get("error"):
             rate_cell = f"**erro: {r['error']}**"
+        elif r.get("skipped"):
+            rate_cell = f"**skipped: {r['note']}**"
         else:
             rate_cell = f"{rate(r):,.0f}"
             if not r.get("valid"):
@@ -338,14 +420,11 @@ def main():
     }
     print(f"lib: {meta['dll']} ({meta['dll_bytes']} B)  threads=native cpu-1")
 
-    # Comparar nativo novo com WASM velho invalida a comparacao. Avisa se
-    # qualquer fonte do core for mais nova que o build WASM.
-    if args.wasm and have_wasm:
-        newest = max(os.path.getmtime(os.path.join(ROOT, "core", f))
-                     for f in os.listdir(os.path.join(ROOT, "core"))
-                     if f.endswith((".c", ".h")))
-        if meta["wasm_mtime"] < newest:
-            print("AVISO: wasm/out mais antigo que core/ - rode wasm/build_wasm.bat")
+    # Artefato velho vs core/ invalida os numeros (a ABI do modo auto mudou em
+    # 980b406 e uma DLL velha fazia o auto64 falhar inteiro, em silencio).
+    for msg in staleness_warnings(meta["dll_mtime"], newest_core_mtime(),
+                                  meta["wasm_mtime"] if args.wasm else None):
+        print(msg)
 
     rows = []
     for name in chosen:
@@ -357,9 +436,11 @@ def main():
             row["extrapolated_full_ms"] = None if full_ms is None else round(full_ms, 1)
             rows.append(row)
             if row.get("error"):
-                print(f"  {name:10s} {row['phase']:8s} ERRO: {row['error']}")
+                print(f"  {name:10s} {row['phase']:12s} ERRO: {row['error']}")
+            elif row.get("skipped"):
+                print(f"  {name:10s} {row['phase']:12s} skipped: {row['note']}")
             else:
-                print(f"  {name:10s} {row['phase']:8s} {rate(row):14,.0f}/s"
+                print(f"  {name:10s} {row['phase']:12s} {rate(row):14,.0f}/s"
                       f" ({row['checked']} em {row['elapsed_ms'] / 1000.0:.2f}s)")
 
     os.makedirs(OUT_DIR, exist_ok=True)
