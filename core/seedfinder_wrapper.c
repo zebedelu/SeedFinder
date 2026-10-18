@@ -306,7 +306,9 @@ SEEDFINDER_API char *seedfinder_crack(
     CrackTarget targets[CRACK_MAX_STRUCTURES];
     int n = 0;
     char *err = NULL;
-    if (crackTargetsBuild(types, numTypes, xBlocks, zBlocks, tolerance,
+    int tol[CRACK_MAX_STRUCTURES];
+    for (int i = 0; i < numTypes && i < CRACK_MAX_STRUCTURES; i++) tol[i] = tolerance;
+    if (crackTargetsBuild(types, numTypes, xBlocks, zBlocks, tol,
                           targets, &n, &err))
         return err;
     if (maxResults <= 0 || maxResults > 2000)

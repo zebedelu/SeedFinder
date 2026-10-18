@@ -46,7 +46,7 @@ static int testParity(void) {
 static Anchor48 mkAnchors(uint64_t fullSeed, long long tol) {
     // Gera âncoras autoconsistentes: posiciona 3 Trial Chambers via cubiomes
     // a partir da seed fixture e usa as próprias coords como alvo.
-    Anchor48 a; a.nJava = 0; a.maxD2 = (int)(tol * tol);
+    Anchor48 a; a.nJava = 0;
     const int T = Trial_Chambers;
     const long long CHUNKS[][2] = {{0,0},{3,-2},{-4,1}};
     for (int i = 0; i < 3; i++) {
@@ -57,6 +57,7 @@ static Anchor48 mkAnchors(uint64_t fullSeed, long long tol) {
         javaCfgFor(T, &a.cfg[j]);
         long long cx = (p.x - 8) >> 4, cz = (p.z - 8) >> 4;
         a.chunkX[j] = cx; a.chunkZ[j] = cz;
+        a.maxD2[j] = (int)(tol * tol);
         // regiões candidatas exatas: a região que gerou este chunk
         a.nRegions[j] = 1; a.regX[j][0] = rx; a.regZ[j][0] = rz;
     }

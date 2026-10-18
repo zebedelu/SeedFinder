@@ -42,11 +42,12 @@ void javaChunk(const JavaCfg *c, uint64_t s48, int regX, int regZ,
 }
 
 int anchor48Build(Anchor48 *a, const int *types, const double *xb, const double *zb,
-                  int n, int tolerance) {
+                  const int *tolerances, int n) {
     if (n < 1 || n > C64_MAX) return -1;
     a->nJava = 0;
-    a->maxD2 = tolerance * tolerance;
     for (int i = 0; i < n; i++) {
+        int tol = tolerances[i];
+        if (tol < 0 || tol > 8) return -1;
         JavaCfg c;
         if (!javaCfgFor(types[i], &c)) return -1; // chamador valida antes; cinto de seguranca
         /* O bloco que o usuario le (/tp) e o que o /scan reporta para 23/24 e'
@@ -58,14 +59,15 @@ int anchor48Build(Anchor48 *a, const int *types, const double *xb, const double 
         long long cz = ((long long)zb[i] >> 4) - 1;
         int j = a->nJava++;
         a->cfg[j] = c; a->chunkX[j] = cx; a->chunkZ[j] = cz;
+        a->maxD2[j] = tol * tol;
         // celulas candidatas: mesma formula de regiao do seedfinder_crack (floor-div)
         int rs = c.regionSize;
-        long long lox = (cx - tolerance - (rs - 1)) / rs;
-        long long hix = (cx + tolerance >= 0) ? (cx + tolerance) / rs
-                                              : (cx + tolerance - (rs - 1)) / rs;
-        long long loz = (cz - tolerance - (rs - 1)) / rs;
-        long long hiz = (cz + tolerance >= 0) ? (cz + tolerance) / rs
-                                              : (cz + tolerance - (rs - 1)) / rs;
+        long long lox = (cx - tol - (rs - 1)) / rs;
+        long long hix = (cx + tol >= 0) ? (cx + tol) / rs
+                                        : (cx + tol - (rs - 1)) / rs;
+        long long loz = (cz - tol - (rs - 1)) / rs;
+        long long hiz = (cz + tol >= 0) ? (cz + tol) / rs
+                                        : (cz + tol - (rs - 1)) / rs;
         int k = 0;
         for (long long x = lox; x <= hix && k < 64; x++)
             for (long long z = loz; z <= hiz && k < 64; z++)
@@ -82,7 +84,7 @@ static inline int anchorHit(const Anchor48 *a, int j, uint64_t s48) {
         long long cx, cz;
         javaChunk(&a->cfg[j], s48, a->regX[j][r], a->regZ[j][r], &cx, &cz);
         long long dx = cx - a->chunkX[j], dz = cz - a->chunkZ[j];
-        if (dx * dx + dz * dz <= (long long)a->maxD2) return 1;
+        if (dx * dx + dz * dz <= (long long)a->maxD2[j]) return 1;
     }
     return 0;
 }
@@ -275,6 +277,7 @@ static void c64SwapJavaRow(Anchor48 *a, int i, int j) {
     long long v = a->chunkX[i]; a->chunkX[i] = a->chunkX[j]; a->chunkX[j] = v;
     v = a->chunkZ[i]; a->chunkZ[i] = a->chunkZ[j]; a->chunkZ[j] = v;
     int k = a->nRegions[i]; a->nRegions[i] = a->nRegions[j]; a->nRegions[j] = k;
+    k = a->maxD2[i]; a->maxD2[i] = a->maxD2[j]; a->maxD2[j] = k;
     int tmp[CRACK_MAX_REGIONS];
     memcpy(tmp, a->regX[i], sizeof tmp);
     memcpy(a->regX[i], a->regX[j], sizeof tmp);
@@ -341,7 +344,9 @@ char *seedfinder_crack64(const int *mtTypes, const double *mtX, const double *mt
             return strdup("{\"error\":\"coordinates out of range\"}");
     }
     Anchor48 anc;
-    if (anchor48Build(&anc, jTypes, jX, jZ, nJava, tolerance) != 0)
+    int tolC[C64_MAX];
+    for (int i = 0; i < nJava; i++) tolC[i] = tolerance;
+    if (anchor48Build(&anc, jTypes, jX, jZ, tolC, nJava) != 0)
         return strdup("{\"error\":\"invalid coordinates\"}");
     // ordem de varredura: menos celulas primeiro (filtro mais forte cedo,
     // espelhando crackTargetCompare); jOrder mapeia linha -> indice de entrada.

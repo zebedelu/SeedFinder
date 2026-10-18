@@ -23,7 +23,7 @@
 SEEDFINDER_API char *seedfinder_crack_auto_sweep(
     const int *types, int numTypes,
     const double *xBlocks, const double *zBlocks,
-    int tolerance, uint64_t startSeed, uint64_t endSeed,
+    const int *tolerances, uint64_t startSeed, uint64_t endSeed,
     int maxResults, double timeBudgetSec, int numThreads);
 
 /* Deteccao 32-bit + lift de ancoras Java. A validacao completa (placement +
@@ -36,10 +36,11 @@ SEEDFINDER_API char *seedfinder_crack_auto_sweep(
  * nJava = 0 => sem ancoras (s48 vazio). Retorno malloc'd; liberar com
  * seedfinder_free_result. */
 SEEDFINDER_API char *seedfinder_crack_auto_lift48(
-    const int *mtTypes, const double *mtX, const double *mtZ, int nMt,
+    const int *mtTypes, const double *mtX, const double *mtZ, const int *mtTol,
+    int nMt,
     const uint64_t *lo32Seeds, int nLo32,
-    const int *jTypes, const double *jX, const double *jZ, int nJava,
-    int tolerance, int maxResults);
+    const int *jTypes, const double *jX, const double *jZ, const int *jTol,
+    int nJava, int maxResults);
 
 /* Lift 48->63 via bioma: para cada s48 itera hi in [0, 2^15)
  * (seed < 2^63 => bits 48..62), full = (hi << 48) | (s48 & 0xFFFFFFFFFFFF),
@@ -59,9 +60,10 @@ SEEDFINDER_API char *seedfinder_crack_auto_lift48(
  * Retorno malloc'd; liberar com seedfinder_free_result. */
 SEEDFINDER_API char *seedfinder_crack_auto_lift63(
     const uint64_t *s48Seeds, int nS48,
-    const int *mtTypes, const double *mtX, const double *mtZ, int nMt,
-    const int *jTypes, const double *jX, const double *jZ, int nJava,
-    int tolerance,
+    const int *mtTypes, const double *mtX, const double *mtZ, const int *mtTol,
+    int nMt,
+    const int *jTypes, const double *jX, const double *jZ, const int *jTol,
+    int nJava,
     int maxResults, double timeBudgetSec);
 
 #endif

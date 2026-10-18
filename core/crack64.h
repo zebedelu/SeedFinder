@@ -23,7 +23,7 @@ typedef struct {
     int       nJava;                                  // 1..C64_MAX
     JavaCfg   cfg[C64_MAX];
     long long chunkX[C64_MAX], chunkZ[C64_MAX];
-    int       maxD2;                                  // tolerance^2 em chunks
+    int       maxD2[C64_MAX];                         // tolerance^2 por ancora (chunks)
     int       nRegions[C64_MAX];
     int       regX[C64_MAX][64], regZ[C64_MAX][64];   // celulas candidatas (mesma formula do crack 32)
 } Anchor48;
@@ -33,7 +33,7 @@ typedef struct {
 // out: sweep48 RESETA o vetor (out->n = 0); sweep48MT faz APPEND sem resetar
 // (merge dos workers) — trocar as duas silenciosmente descartaria sobreviventes.
 int  anchor48Build(Anchor48 *a, const int *types, const double *xb, const double *zb,
-                   int n, int tolerance);             // 0 ok / -1 erro
+                   const int *tolerances, int n);     // 0 ok / -1 erro
 void sweep48(const Anchor48 *a, uint64_t s48Start, uint64_t s48End,
              double deadlineMs, U64Vec *out, int *timedOut);
 

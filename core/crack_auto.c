@@ -15,7 +15,7 @@
 char *seedfinder_crack_auto_sweep(
     const int *types, int numTypes,
     const double *xBlocks, const double *zBlocks,
-    int tolerance, uint64_t startSeed, uint64_t endSeed,
+    const int *tolerances, uint64_t startSeed, uint64_t endSeed,
     int maxResults, double timeBudgetSec, int numThreads)
 {
     /* Só no modo auto: o seedfinder_crack continua aceitando 23/24. */
@@ -36,7 +36,7 @@ char *seedfinder_crack_auto_sweep(
     CrackTarget targets[CRACK_MAX_STRUCTURES];
     int n = 0;
     char *err = NULL;
-    if (crackTargetsBuild(types, numTypes, xBlocks, zBlocks, tolerance,
+    if (crackTargetsBuild(types, numTypes, xBlocks, zBlocks, tolerances,
                           targets, &n, &err))
         return err;
 
@@ -77,10 +77,11 @@ char *seedfinder_crack_auto_sweep(
 }
 
 char *seedfinder_crack_auto_lift48(
-    const int *mtTypes, const double *mtX, const double *mtZ, int nMt,
+    const int *mtTypes, const double *mtX, const double *mtZ, const int *mtTol,
+    int nMt,
     const uint64_t *lo32Seeds, int nLo32,
-    const int *jTypes, const double *jX, const double *jZ, int nJava,
-    int tolerance, int maxResults)
+    const int *jTypes, const double *jX, const double *jZ, const int *jTol,
+    int nJava, int maxResults)
 {
     /* Só no modo auto: 23/24 são ancoras Java, nunca alvos de sweep —
      * checado antes de crackTargetsBuild (que continua aceitando-os). */
@@ -100,17 +101,19 @@ char *seedfinder_crack_auto_lift48(
     if (nMt + nJava > CRACK_MAX_STRUCTURES)
         return strdup("{\"error\":\"too many structures (max 24)\"}");
     int cT[CRACK_MAX_STRUCTURES];
+    int cTol[CRACK_MAX_STRUCTURES];
     double cX[CRACK_MAX_STRUCTURES], cZ[CRACK_MAX_STRUCTURES];
     for (int i = 0; i < nMt; i++) {
-        cT[i] = mtTypes[i]; cX[i] = mtX[i]; cZ[i] = mtZ[i];
+        cT[i] = mtTypes[i]; cX[i] = mtX[i]; cZ[i] = mtZ[i]; cTol[i] = mtTol[i];
     }
     for (int i = 0; i < nJava; i++) {
         cT[nMt + i] = jTypes[i]; cX[nMt + i] = jX[i]; cZ[nMt + i] = jZ[i];
+        cTol[nMt + i] = jTol[i];
     }
     CrackTarget targets[CRACK_MAX_STRUCTURES];
     int n = 0;
     char *err = NULL;
-    if (crackTargetsBuild(cT, nMt + nJava, cX, cZ, tolerance, targets, &n, &err))
+    if (crackTargetsBuild(cT, nMt + nJava, cX, cZ, cTol, targets, &n, &err))
         return err;
 
     /* direct32: validação completa dos alvos combinados (mt→java), matches na
@@ -137,7 +140,7 @@ char *seedfinder_crack_auto_lift48(
     U64Vec s48 = {0};
     if (nJava > 0 && nLo32 == 1) {
         Anchor48 anc;
-        if (anchor48Build(&anc, jTypes, jX, jZ, nJava, tolerance) != 0) {
+        if (anchor48Build(&anc, jTypes, jX, jZ, jTol, nJava) != 0) {
             free(hits);
             return strdup("{\"error\":\"invalid Java anchors (Trail Ruins=23 / "
                           "Trial Chambers=24 with valid coordinates)\"}");
@@ -220,9 +223,10 @@ static int64_t anchorBest(const Anchor48 *a, int j, uint64_t s48, int *mx, int *
 
 char *seedfinder_crack_auto_lift63(
     const uint64_t *s48Seeds, int nS48,
-    const int *mtTypes, const double *mtX, const double *mtZ, int nMt,
-    const int *jTypes, const double *jX, const double *jZ, int nJava,
-    int tolerance,
+    const int *mtTypes, const double *mtX, const double *mtZ, const int *mtTol,
+    int nMt,
+    const int *jTypes, const double *jX, const double *jZ, const int *jTol,
+    int nJava,
     int maxResults, double timeBudgetSec)
 {
     /* Só no modo auto: 23/24 são âncoras Java (já resolvidas pelo lift48),
@@ -241,13 +245,16 @@ char *seedfinder_crack_auto_lift63(
     CrackTarget targets[CRACK_MAX_STRUCTURES];
     int n = 0;
     char *err = NULL;
-    if (crackTargetsBuild(mtTypes, nMt, mtX, mtZ, tolerance, targets, &n, &err))
+    if (crackTargetsBuild(mtTypes, nMt, mtX, mtZ, mtTol, targets, &n, &err))
         return err;
 
     /* Âncoras Java (nJava = 0 => score só das MT). Erro de validação vem com a
      * mensagem acionável do próprio lift48 — repassar em vez de mascarar. */
     Anchor48 anc = {0};
-    if (nJava > 0 && anchor48Build(&anc, jTypes, jX, jZ, nJava, tolerance) != 0)
+    for (int j = 0; nJava > 0 && j < nJava; j++)
+        if (jTol[j] < 0 || jTol[j] > 8)
+            return strdup("{\"error\":\"tolerance must be between 0 and 8 chunks\"}");
+    if (nJava > 0 && anchor48Build(&anc, jTypes, jX, jZ, jTol, nJava) != 0)
         return strdup("{\"error\":\"invalid Java anchors (Trail Ruins=23 / "
                       "Trial Chambers=24 with valid coordinates)\"}");
 

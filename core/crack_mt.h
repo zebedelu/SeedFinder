@@ -69,7 +69,8 @@ MtSweepResult sweepMtSurvivors(const CrackTarget *targets, int nTargets,
  * Retorna 0 ok; *err = malloc'd JSON {"error":...} se falhar. */
 int  crackTargetsBuild(const int *types, int numTypes,
                        const double *xBlocks, const double *zBlocks,
-                       int tolerance, CrackTarget out[], int *nOut, char **err);
+                       const int *tolerances, CrackTarget out[], int *nOut,
+                       char **err);
 
 /* Extrai o núcleo worker/top-N (crackWorker + crackInsert + merge) do
  * seedfinder_crack. *out vem ordenado por score asc, capado em maxResults.

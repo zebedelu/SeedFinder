@@ -44,16 +44,18 @@ def sweep(lib, structures, tolerance=TOLERANCE, start=0, end=END,
     types = (ctypes.c_int * n)(*(s["type"] for s in structures))
     xs = (ctypes.c_double * n)(*(float(s["x"]) for s in structures))
     zs = (ctypes.c_double * n)(*(float(s["z"]) for s in structures))
+    tols = (ctypes.c_int * n)(*([tolerance] * n))  # ABI: tolerance por alvo
     lib.seedfinder_crack_auto_sweep.argtypes = [
         ctypes.POINTER(ctypes.c_int), ctypes.c_int,
         ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
-        ctypes.c_int, ctypes.c_uint64, ctypes.c_uint64,
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.c_uint64, ctypes.c_uint64,
         ctypes.c_int, ctypes.c_double, ctypes.c_int,
     ]
     lib.seedfinder_crack_auto_sweep.restype = ctypes.c_void_p
     lib.seedfinder_free_result.argtypes = [ctypes.c_void_p]
     lib.seedfinder_free_result.restype = None
-    p = lib.seedfinder_crack_auto_sweep(types, n, xs, zs, tolerance, start, end,
+    p = lib.seedfinder_crack_auto_sweep(types, n, xs, zs, tols, start, end,
                                         max_results, budget, threads)
     if not p:
         raise RuntimeError("seedfinder_crack_auto_sweep returned NULL")
@@ -138,6 +140,7 @@ def lift48(lib, mt, lo32_seeds, java=None, tolerance=0, max_results=2000):
     types = (ctypes.c_int * n)(*(s["type"] for s in mt))
     xs = (ctypes.c_double * n)(*(float(s["x"]) for s in mt))
     zs = (ctypes.c_double * n)(*(float(s["z"]) for s in mt))
+    mt_tols = (ctypes.c_int * n)(*([tolerance] * n))  # ABI: tolerance por alvo
     lo = (ctypes.c_uint64 * max(len(lo32_seeds), 1))(
         *(int(s) & 0xFFFFFFFFFFFFFFFF for s in lo32_seeds))
     java = java or []
@@ -146,23 +149,25 @@ def lift48(lib, mt, lo32_seeds, java=None, tolerance=0, max_results=2000):
         jt = (ctypes.c_int * jn)(*(s["type"] for s in java))
         jx = (ctypes.c_double * jn)(*(float(s["x"]) for s in java))
         jz = (ctypes.c_double * jn)(*(float(s["z"]) for s in java))
+        jt_tols = (ctypes.c_int * jn)(*([tolerance] * jn))
     else:
-        jt = jx = jz = None
+        jt = jx = jz = jt_tols = None
     lib.seedfinder_crack_auto_lift48.argtypes = [
         ctypes.POINTER(ctypes.c_int),
         ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
-        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_int), ctypes.c_int,
         ctypes.POINTER(ctypes.c_uint64), ctypes.c_int,
         ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_double),
         ctypes.POINTER(ctypes.c_double),
-        ctypes.c_int, ctypes.c_int, ctypes.c_int,
+        ctypes.POINTER(ctypes.c_int), ctypes.c_int,
+        ctypes.c_int,
     ]
     lib.seedfinder_crack_auto_lift48.restype = ctypes.c_void_p
     lib.seedfinder_free_result.argtypes = [ctypes.c_void_p]
     lib.seedfinder_free_result.restype = None
     p = lib.seedfinder_crack_auto_lift48(
-        types, xs, zs, n, lo, len(lo32_seeds), jt, jx, jz, jn,
-        tolerance, max_results)
+        types, xs, zs, mt_tols, n, lo, len(lo32_seeds), jt, jx, jz, jt_tols, jn,
+        max_results)
     if not p:
         raise RuntimeError("seedfinder_crack_auto_lift48 returned NULL")
     try:
@@ -233,6 +238,7 @@ def lift63(lib, s48_seeds, mt, tolerance=TOLERANCE, max_results=2000,
     types = (ctypes.c_int * n)(*(s["type"] for s in mt))
     xs = (ctypes.c_double * n)(*(float(s["x"]) for s in mt))
     zs = (ctypes.c_double * n)(*(float(s["z"]) for s in mt))
+    mt_tols = (ctypes.c_int * n)(*([tolerance] * n))  # ABI: tolerance por alvo
     seeds = (ctypes.c_uint64 * max(len(s48_seeds), 1))(
         *(int(s) & 0xFFFFFFFFFFFFFFFF for s in s48_seeds))
     java = java or []
@@ -241,23 +247,25 @@ def lift63(lib, s48_seeds, mt, tolerance=TOLERANCE, max_results=2000,
         jt = (ctypes.c_int * jn)(*(s["type"] for s in java))
         jx = (ctypes.c_double * jn)(*(float(s["x"]) for s in java))
         jz = (ctypes.c_double * jn)(*(float(s["z"]) for s in java))
+        jt_tols = (ctypes.c_int * jn)(*([tolerance] * jn))
     else:
-        jt = jx = jz = None
+        jt = jx = jz = jt_tols = None
     lib.seedfinder_crack_auto_lift63.argtypes = [
         ctypes.POINTER(ctypes.c_uint64), ctypes.c_int,
         ctypes.POINTER(ctypes.c_int),
         ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
-        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_int), ctypes.c_int,
         ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_double),
         ctypes.POINTER(ctypes.c_double),
-        ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_double,
+        ctypes.POINTER(ctypes.c_int), ctypes.c_int,
+        ctypes.c_int, ctypes.c_double,
     ]
     lib.seedfinder_crack_auto_lift63.restype = ctypes.c_void_p
     lib.seedfinder_free_result.argtypes = [ctypes.c_void_p]
     lib.seedfinder_free_result.restype = None
     p = lib.seedfinder_crack_auto_lift63(
-        seeds, len(s48_seeds), types, xs, zs, n, jt, jx, jz, jn,
-        tolerance, max_results, budget)
+        seeds, len(s48_seeds), types, xs, zs, mt_tols, n, jt, jx, jz, jt_tols,
+        jn, max_results, budget)
     if not p:
         raise RuntimeError("seedfinder_crack_auto_lift63 returned NULL")
     try:

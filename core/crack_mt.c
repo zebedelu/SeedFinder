@@ -9,6 +9,7 @@
 #include "platform_threads.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <limits.h>
 
 int crack_g_simd = 0; /* disponibilidade SIMD em runtime; setada por crackSimdDetect() */
@@ -347,11 +348,13 @@ MtSweepResult sweepMtSurvivors(const CrackTarget *targets, int nTargets,
 }
 
 /* --- Extraído de seedfinder_wrapper.c: validação + construção ------------
- * Mesmas checagens e mesma ordem de seedfinder_crack (≥4, ≤24, tol 0–8,
- * tipo desconhecido, Mineshaft, coordenadas). out fica em ordem de entrada. */
+ * Mesmas checagens e mesma ordem de seedfinder_crack (≥4, ≤24, tol 0–8 por
+ * estrutura, tipo desconhecido, Mineshaft, coordenadas). out fica em ordem de
+ * entrada. */
 int crackTargetsBuild(const int *types, int numTypes,
                       const double *xBlocks, const double *zBlocks,
-                      int tolerance, CrackTarget out[], int *nOut, char **err)
+                      const int *tolerances, CrackTarget out[], int *nOut,
+                      char **err)
 {
     *err = NULL;
     *nOut = 0;
@@ -363,13 +366,17 @@ int crackTargetsBuild(const int *types, int numTypes,
         *err = strdup("{\"error\":\"too many structures (max 24)\"}");
         return 1;
     }
-    if (tolerance < 0 || tolerance > 8) {
-        *err = strdup("{\"error\":\"tolerance must be between 0 and 8 chunks\"}");
-        return 1;
-    }
 
-    int maxD2 = tolerance * tolerance;
     for (int i = 0; i < numTypes; i++) {
+        int tol = tolerances[i];
+        if (tol < 0 || tol > 8) {
+            char msg[128];
+            snprintf(msg, sizeof msg,
+                     "{\"error\":\"structure #%d: tolerance must be between 0 "
+                     "and 8 chunks\"}", i + 1);
+            *err = strdup(msg);
+            return 1;
+        }
         StructureConfig sconf;
         if (!getBedrockStructureConfig(types[i], MC_NEWEST, &sconf)) {
             *err = strdup("{\"error\":\"unknown structure type\"}");
@@ -394,14 +401,14 @@ int crackTargetsBuild(const int *types, int numTypes,
         t->type = types[i];
         t->chunkX = chunkX;
         t->chunkZ = chunkZ;
-        t->maxD2 = maxD2;
+        t->maxD2 = tol * tol;
 
-        int64_t rLoX = (chunkX - tolerance - (sconf.regionSize - 1)) / sconf.regionSize;
-        int64_t rHiX = (chunkX + tolerance >= 0) ? (chunkX + tolerance) / sconf.regionSize
-                                                 : (chunkX + tolerance - (sconf.regionSize - 1)) / sconf.regionSize;
-        int64_t rLoZ = (chunkZ - tolerance - (sconf.regionSize - 1)) / sconf.regionSize;
-        int64_t rHiZ = (chunkZ + tolerance >= 0) ? (chunkZ + tolerance) / sconf.regionSize
-                                                 : (chunkZ + tolerance - (sconf.regionSize - 1)) / sconf.regionSize;
+        int64_t rLoX = (chunkX - tol - (sconf.regionSize - 1)) / sconf.regionSize;
+        int64_t rHiX = (chunkX + tol >= 0) ? (chunkX + tol) / sconf.regionSize
+                                           : (chunkX + tol - (sconf.regionSize - 1)) / sconf.regionSize;
+        int64_t rLoZ = (chunkZ - tol - (sconf.regionSize - 1)) / sconf.regionSize;
+        int64_t rHiZ = (chunkZ + tol >= 0) ? (chunkZ + tol) / sconf.regionSize
+                                           : (chunkZ + tol - (sconf.regionSize - 1)) / sconf.regionSize;
 
         int n = 0;
         for (int64_t rx = rLoX; rx <= rHiX && n < CRACK_MAX_REGIONS; rx++) {
