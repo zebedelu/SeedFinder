@@ -162,9 +162,10 @@ static int testSweepMTTimeout(void) {
 // FULL±2^24, max 100, 120 s, 2 threads.
 static int testCrack64(void) {
     const uint64_t FULL = 7777777777777777777ULL;
-    // 1 trial chamber alvo (âncora 2^48) — bloco CRUA, como o scan entrega:
-    // anchor48Build extrai o chunk alvo com (bloco - 8) >> 4, mesmo espaço
-    // do javaChunk, então a posição exata pontua d2 = 0.
+    // 1 trial chamber alvo (âncora 2^48) — bloco CRUA (canto, como o scan
+    // entrega): anchor48Build usa alvo = (bloco >> 4) - 1, o mesmo espaço do
+    // javaChunk, então a posição exata pontua d2 = 0 (vale também para o bloco
+    // lido em jogo, /tp = canto + 8).
     Pos p; assert(getStructurePos(Trial_Chambers, MC_NEWEST, FULL, 0, 0, &p));
     int    jT[1] = { Trial_Chambers };
     double jX[1] = { (double)p.x }, jZ[1] = { (double)p.z };
