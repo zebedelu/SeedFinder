@@ -3,19 +3,26 @@
 F0 do app SeedCracker: quanto o motor custa em cada runner (`.dll` nativo vs
 build WASM) para decidir qual promessa pública os números sustentam.
 
-- **Data:** 2026-10-18 · **Branch:** `feat/f0-bench` · **Commit medido:** `ff7f85b`
-  (+ a correção de formatação `seed_str` em `core/crack_mitm.c` do working tree,
-  que não afeta taxa).
+- **Data:** 2026-10-18 · **Branch:** `feat/f0-bench` · **Commit medido:** `ff7f85b`.
+- **Procedência do artefato nativo (auditoria):** a
+  `build_server/seedfinder_lib.dll` medida foi construída de um **working tree com
+  alteração NÃO commitada** em `core/crack_mitm.c` (formatação do `seed_str`,
+  signed). Por isso **este registro não é reproduzível apenas a partir dos fontes
+  commitados** — um build do HEAD puro sai byte-diferente. A alteração é **neutra
+  em taxa** nos caminhos medidos: só muda o texto de `seed_str` de um hit do MITM,
+  e a janela de timing medida é isenta de acerto (nenhum hit é serializado).
 - **Máquina:** Windows, **6 núcleos**, Python 3.13.12, Node v26.7.0.
 - **Artefato nativo:** `build_server/seedfinder_lib.dll` (824021 B, reconstruído
   para esta medição). **Artefato WASM (produção):** `wasm/out/seedfinder.wasm`
   (566780 B).
 - **Convenção numérica:** `.` = separador decimal e inteiros **sem** separador de
   milhar (os dígitos ficam todos juntos). Nenhuma vírgula aparece dentro de um
-  número, em nenhum lugar do documento — assim `~1696 s` só pode ser lido como mil
-  seiscentos e noventa e seis segundos, nunca como "1.7 s". (O separador de milhar
-  foi removido da saída do bench para manter esta regra; os valores são os
-  medidos.)
+  número, em nenhum lugar deste documento — assim `~1696 s` só pode ser lido como
+  mil seiscentos e noventa e seis segundos, nunca como "1.7 s". **É o documento
+  que normaliza, não a ferramenta:** `python server/bench.py` continua imprimindo
+  a taxa com separador de milhar (vírgula, via `{rate:,.0f}` em `bench.py`); as
+  tabelas abaixo são essa saída real com os separadores de milhar removidos à mão.
+  Os valores são os medidos.
 
 ## Metodologia
 
@@ -88,8 +95,11 @@ require-corp`) no site. O Node do benchmark não precisa deles.
 ## Resultados
 
 Tabela principal — saída real de `python server/bench.py --repeat 3 --wasm`
-(produção: nativo 5T, WASM 1T). Coluna final = tempo estimado para o espaço
-completo, **extrapolado** da taxa medida (`--full` **não** foi executado):
+(produção: nativo 5T, WASM 1T). O CLI ainda imprime a taxa com separador de
+milhar (vírgula); aqui esses separadores foram removidos à mão para respeitar a
+convenção numérica (ver acima) — os valores são literais, a pontuação não. Coluna
+final = tempo estimado para o espaço completo, **extrapolado** da taxa medida
+(`--full` **não** foi executado):
 
 | runner | fixture | fase | unidade | threads | checked | tempo (s) | taxa/s | espaço completo (extrapolado) |
 |---|---|---|---|---|---|---|---|---|
@@ -108,7 +118,15 @@ completo, **extrapolado** da taxa medida (`--full` **não** foi executado):
 
 ¹ `java_mitm` mede a janela de timing `U ∈ [2^16, 2^17)`, isenta de acerto. Em
 `--full` a seed verdadeira (U = 256) causa early-exit, então a extrapolação
-**superestima** o tempo end-to-end real.
+**superestima** o tempo end-to-end real. Além disso, **extrapolar a coluna do
+MITM é um descasamento de modelo, não uma medição:** o `checked` que o motor
+reporta nessa fase é `N + nU`, com `N = 2^24` (construção da LUT, custo fixo,
+`core/crack_mitm.c`, linhas 307 e 438) e `nU = 65536` (a janela) — ~257× maior que a largura
+de janela que o bench registra (`checked = end_u - start_u = 65536`). A taxa do
+bench já carrega esse custo fixo no denominador, e a extrapolação o multiplica por
+256, como se a LUT fosse reconstruída 256 vezes; o `--full` real constrói a LUT
+**uma** vez. Trate as células `~2741 s` e `~10222 s` como ordem de grandeza, não
+como medição.
 
 Referência **1-thread** (para isolar SIMD/codegen do paralelismo). Nativo de
 `python server/bench.py --fixtures bedrock32 --threads 1 --repeat 3`; o WASM 1T
@@ -130,6 +148,19 @@ build **`SEEDFINDER_WASM_PTHREAD=ON`** (**não** é o build de produção). A co
 | wasm (pthread) | bedrock32 | crack32 | 8 | 67108864 | 16.38 | 4096021 |
 | wasm (pthread) | auto64 | sweep | 5 | 67108864 | 13.47 | 4980286 |
 | wasm (pthread) | auto64 | lift48 | 1 | 2000 | 0.19 | 10762 |
+
+Par **nativo** dos mesmos comandos (o lado nativo roda junto, no mesmo
+`--repeat 3`; é a origem de `2826388/s` e `4041523/s` usados na *Leitura*):
+
+| runner | fixture | fase | threads | checked | tempo (s) | taxa/s |
+|---|---|---|---|---|---|---|
+| native | bedrock32 | crack32 | 5 | 67108864 | 23.74 | 2826388 |
+| native | bedrock32 | crack32 | 5 | 67108864 | 23.97 | 2799513 |
+| native | auto64 | sweep | 5 | 67108864 | 16.60 | 4041523 |
+
+As duas linhas de `bedrock32` são os lados nativos do comando de 5 threads
+(`2826388/s`, pareado com o WASM 5T) e do de 8 threads (`2799513/s`, pareado com o
+WASM 8T); só o par de 5T entra nos fatores.
 
 O `8T` **não** é melhor que o `5T` aqui: o pool pede 8 threads em 6 núcleos
 (oversubscribe) e o resultado varia entre execuções — o ganho relevante é a 5T.
@@ -162,18 +193,24 @@ Mesmo `checked`, mesmos `results` → o particionamento por threads está corret
 ## Leitura
 
 Fatores derivados (produção, o que o usuário sente hoje). Todos saem de números
-impressos acima:
+impressos acima (tabela principal, referência 1-thread, tabela threaded e o par
+nativo dela):
 
 - **Fator total `bedrock32`** (WASM 1T ÷ nativo 5T): `67.07 / 26.50 = 2.53×` — o
   WASM de produção é ~2.5× mais lento end-to-end.
 - **Fator total `java_mitm`** (ambos 1T): `39.93 / 10.71 = 3.73×` — o WASM é
   ~3.7× mais lento (o MITM não é paralelizado em nenhum dos lados).
-- **Fator por thread** (isola SIMD/codegen), pela fórmula do brief
-  `(native/s) / threads / (wasm/s)`: `(2532416 / 5) / 1000519 = 0.506` → **o
-  WASM é ~1.98× mais rápido POR THREAD**. A vantagem nativa vem inteiramente do
-  paralelismo, não do motor.
-- **1T vs 1T** (referência 1-thread): `1000519 / 732859 = 1.37×` — o WASM já
-  ganha do nativo com **uma** thread.
+- **Fator por thread — número headline (medido direto, 1T vs 1T):**
+  `1000519 / 732859 = 1.37×` — o WASM já ganha do nativo com **uma** thread
+  (linhas da referência 1-thread acima). É o único número por-thread **medido**,
+  sem modelo.
+- **Número normalizado por threading** (fórmula do brief
+  `(native/s) / threads / (wasm/s)`): `(2532416 / 5) / 1000519 = 0.506` → WASM
+  ~1.98× "por thread". **Isto não é um speedup por thread medido:** pressupõe que
+  o nativo 5T escala linearmente a partir do 1T (`5 × 732859 = 3664295/s`), e os
+  dados **contradizem** essa premissa — o nativo 5T real é `2532416/s`, só ~3.5× o
+  1T. Serve para separar threading de codegen, não como promessa de velocidade por
+  thread. A vantagem nativa end-to-end vem do paralelismo, não do motor.
   - Os números de 1 thread variam entre execuções na mesma máquina: medições
     anteriores deste harness (mesma máquina) deram nativo 1T **961935/s** e WASM
     1T **~1186903/s** → `1.23×`; o menor par já visto é
@@ -184,7 +221,8 @@ impressos acima:
   benigno). Com o build pthread o WASM **supera** o nativo na mesma máquina. No
   `bedrock32`, pareando o mesmo comando: WASM 5T `4849320/s` vs nativo 5T
   `2826388/s` → `1.72×`; no sweep do `auto64`: `4980286/s` vs `4041523/s` →
-  `1.23×`. O `8T` fica em `4096021/s` (oversubscribe de 6 núcleos).
+  `1.23×` (o par nativo está na tabela threaded acima). O `8T` fica em
+  `4096021/s` (oversubscribe de 6 núcleos).
 
 **Conclusão.** A promessa pública *"baixe porque é mais rápido"* **não é
 sustentada pelos dados**. O WASM já é mais rápido **por thread** (SIMD128 vs

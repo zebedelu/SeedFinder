@@ -439,6 +439,29 @@ def test_wasm_runner_repeats_and_reduces_with_median():
     assert rows[0]["extrapolated_full_ms"] is None, rows[0]
 
 
+def test_wasm_sweep_row_carries_audit_fields():
+    # A linha do sweep do runner WASM tem de carregar os MESMOS campos de
+    # auditoria do lado nativo (bench.py: top_seeds/found_lo32). O build WASM e o
+    # Node nao existem em CI, entao o contrato e' verificado na fonte do runner...
+    path = os.path.join(os.path.dirname(__file__), "..", "bench_wasm.mjs")
+    src = open(path, encoding="utf-8").read()
+    assert "sweepRow.top_seeds = " in src, "sweep do wasm sem top_seeds"
+    assert "sweepRow.found_lo32 = " in src, "sweep do wasm sem found_lo32"
+    # ...e no caminho Python que consome a linha: a reducao por mediana nao pode
+    # descartar os campos ao escolher a execucao vencedora.
+    def sweep(ms, **kw):
+        row = {"runner": "wasm", "fixture": "auto64", "phase": "sweep",
+               "unit": "seeds", "threads": 1, "checked": 1 << 20,
+               "elapsed_ms": ms, "timed_out": False, "valid": True,
+               "top_seeds": ["5309", "41840"], "found_lo32": True}
+        row.update(kw)
+        return row
+
+    rows = bench._reduce_wasm_runs([[sweep(1000.0)], [sweep(2000.0)]])
+    assert rows[0]["top_seeds"] == ["5309", "41840"], rows[0]
+    assert rows[0]["found_lo32"] is True, rows[0]
+
+
 def test_wasm_reduce_keeps_phase_order_and_skips():
     def r(phase, checked, ms, **kw):
         row = {"runner": "wasm", "fixture": "auto64", "phase": phase, "unit": "u",
@@ -570,6 +593,7 @@ def main():
                test_wasm_runner_failure_is_error_row_not_none,
                test_wasm_runner_repeats_and_reduces_with_median,
                test_wasm_reduce_keeps_phase_order_and_skips,
+               test_wasm_sweep_row_carries_audit_fields,
                test_wasm_timeout_covers_engine_budget,
                test_benchmark_doc_exists,
                test_wasm_threads_flag_forwarded_only_when_given,

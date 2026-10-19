@@ -132,11 +132,19 @@ for (const fx of payload.fixtures) {
     try {
       const sweep = call(m._seedfinder_crack_auto_sweep, [],
         pT, mt.length, pX, pZ, pTol, BigInt(0), BigInt(space), 2000, 3600.0, threads);
-      rows.push(row(fx.name, "sweep", "seeds", threads, sweep.data.checked || 0,
-        sweep.ms, sweep.data));
+      const sweepRow = row(fx.name, "sweep", "seeds", threads, sweep.data.checked || 0,
+        sweep.ms, sweep.data);
+      rows.push(sweepRow);
       if (sweep.data.error) continue;  // sem sweep nao ha fase 2/3 a medir
 
       const lo32 = (sweep.data.results || []).slice(0, 2000).map((r) => r.seed);
+      // Auditoria simetrica ao lado nativo (bench.py: top_seeds/found_lo32 na
+      // linha do sweep): os 5 primeiros candidatos como string e se a lo32
+      // verdadeira apareceu. `fx.seed` e' o valor completo; BigInt evita perder
+      // bits acima de 2^53 ao extrair a lo32.
+      const trueLo32 = Number(BigInt(fx.seed) & 0xffffffffn);
+      sweepRow.top_seeds = lo32.slice(0, 5).map((s) => String(s));
+      sweepRow.found_lo32 = lo32.includes(trueLo32);
       if (!lo32.length) {
         // Sem candidatos nao ha o que liftar: skipped (ausencia), nunca chamar
         // o motor com array vazio (ele recusa e isso seria erro de quem chama).
