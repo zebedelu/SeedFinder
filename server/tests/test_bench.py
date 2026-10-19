@@ -5,6 +5,7 @@ import ctypes
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -488,6 +489,10 @@ def test_benchmark_doc_exists():
     assert "--full" in text, "o doc tem de discutir que --full nao foi executado"
     assert "parcial" in text.lower() or "timed_out" in text, \
         "o documento tem de explicar como linhas cortadas sao tratadas"
+    # A convencao numerica declarada (`.` decimal, sem virgula em numeros) tem
+    # de valer no documento INTEIRO: digito-virgula-digito e' a violacao.
+    assert re.search(r"\d,\d", text) is None, \
+        "virgula entre digitos viola a convencao numerica declarada no doc"
     # O experimento -pthread so' existe como flag no wasm/CMakeLists.txt, que e'
     # untracked por design: sem o comando literal aqui, o numero threaded nao e'
     # reproduzivel a partir do repo.
