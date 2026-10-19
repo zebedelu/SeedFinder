@@ -5,12 +5,13 @@ build WASM) para decidir qual promessa pública os números sustentam.
 
 - **Data:** 2026-10-18 · **Branch:** `feat/f0-bench` · **Commit medido:** `ff7f85b`.
 - **Procedência do artefato nativo (auditoria):** a
-  `build_server/seedfinder_lib.dll` medida foi construída de um **working tree com
-  alteração NÃO commitada** em `core/crack_mitm.c` (formatação do `seed_str`,
-  signed). Por isso **este registro não é reproduzível apenas a partir dos fontes
-  commitados** — um build do HEAD puro sai byte-diferente. A alteração é **neutra
-  em taxa** nos caminhos medidos: só muda o texto de `seed_str` de um hit do MITM,
-  e a janela de timing medida é isenta de acerto (nenhum hit é serializado).
+  `build_server/seedfinder_lib.dll` medida foi construída de um working tree que
+  incluía uma alteração então NÃO commitada em `core/crack_mitm.c` (`seed_str`
+  assinado, para worldseed negativa). Ela foi commitada logo depois em `86a8e3d`,
+  então **o comportamento é reproduzível a partir dos fontes commitados** (os
+  bytes exatos do binário não são prometidos). A alteração é **neutra em taxa**
+  nos caminhos medidos: só muda o texto de `seed_str` de um hit do MITM, e a
+  janela de timing medida é isenta de acerto (nenhum hit é serializado).
 - **Máquina:** Windows, **6 núcleos**, Python 3.13.12, Node v26.7.0.
 - **Artefato nativo:** `build_server/seedfinder_lib.dll` (824021 B, reconstruído
   para esta medição). **Artefato WASM (produção):** `wasm/out/seedfinder.wasm`
