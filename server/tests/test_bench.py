@@ -480,8 +480,12 @@ def test_wasm_timeout_covers_engine_budget():
 def test_benchmark_doc_exists():
     path = os.path.join(os.path.dirname(__file__), "..", "BENCHMARK.md")
     text = open(path, encoding="utf-8").read()
-    for section in ("## Metodologia", "## Resultados", "## Leitura"):
+    for section in ("## Metodologia", "## Resultados", "## Leitura",
+                    "## Limitações"):
         assert section in text, f"falta a secao {section!r}"
+    # As limitacoes reais do F0 tem de estar discutidas, nao so' as secoes.
+    assert "lift63" in text, "o doc tem de discutir a limitacao do lift63"
+    assert "--full" in text, "o doc tem de discutir que --full nao foi executado"
     assert "parcial" in text.lower() or "timed_out" in text, \
         "o documento tem de explicar como linhas cortadas sao tratadas"
     # O experimento -pthread so' existe como flag no wasm/CMakeLists.txt, que e'
@@ -495,6 +499,49 @@ def test_benchmark_doc_exists():
     # linhas threaded (build experimental) com o build que o site serve.
     assert "clamp" in text.lower() or "1 thread" in text.lower(), \
         "o doc tem de dizer que o build de producao roda em 1 thread"
+
+
+def test_wasm_threads_flag_forwarded_only_when_given():
+    # --wasm-threads so' chega ao runner quando PEDIDO: sem o flag o argv tem de
+    # ficar identico ao de sempre (o build de producao e' 1 thread).
+    one = json.dumps([{"runner": "wasm", "fixture": "bedrock32",
+                       "phase": "crack32", "unit": "seeds", "threads": 1,
+                       "checked": 100, "elapsed_ms": 1000.0,
+                       "timed_out": False, "valid": True}])
+    calls = []
+    with _stub_wasm(calls, [_FakeRun(0, one)]):
+        bench.run_wasm(_FX32, 1 << 20)
+    argv = calls[-1][0]
+    assert argv[0] == "node", argv
+    assert "--fixtures" in argv, argv
+    assert "--threads" not in argv, argv
+
+    calls = []
+    with _stub_wasm(calls, [_FakeRun(0, one)]):
+        bench.run_wasm(_FX32, 1 << 20, threads=8)
+    argv = calls[-1][0]
+    assert argv[argv.index("--threads") + 1] == "8", argv
+
+    # threads=None e' o "nao pedido" (nao injeta o argumento).
+    calls = []
+    with _stub_wasm(calls, [_FakeRun(0, one)]):
+        bench.run_wasm(_FX32, 1 << 20, threads=None)
+    assert "--threads" not in calls[-1][0], calls[-1][0]
+
+
+def test_wasm_threads_rejects_non_positive():
+    # Mesmo validador do --threads: 0/negativo recusado na entrada.
+    orig = sys.argv
+    sys.argv = ["bench.py", "--wasm-threads", "0"]
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            bench.main()
+    except SystemExit as e:
+        assert e.code == 2, e.code
+    else:
+        raise AssertionError("--wasm-threads 0 deveria ser recusado")
+    finally:
+        sys.argv = orig
 
 
 def main():
@@ -519,7 +566,9 @@ def main():
                test_wasm_runner_repeats_and_reduces_with_median,
                test_wasm_reduce_keeps_phase_order_and_skips,
                test_wasm_timeout_covers_engine_budget,
-               test_benchmark_doc_exists):
+               test_benchmark_doc_exists,
+               test_wasm_threads_flag_forwarded_only_when_given,
+               test_wasm_threads_rejects_non_positive):
         fn()
         print(f"  ok  {fn.__name__}")
     print("test_bench (fixtures): OK")

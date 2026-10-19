@@ -5,6 +5,7 @@ Uso (da raiz do repo):
     python server/bench.py --repeat 5
     python server/bench.py --full              # espaco inteiro (lento)
     python server/bench.py --wasm              # inclui o build WASM via node
+    python server/bench.py --wasm --wasm-threads 5   # threads PEDIDAS ao wasm
     python server/bench.py --json build_bench/out.json
 
 Saida bruta em build_bench/ (gitignored via build_*/). As conclusoes vao para
@@ -480,9 +481,15 @@ def _ensure_wasm_esm(out_dir):
     return True
 
 
-def run_wasm(fixture, space, repeat=1, full=False):
+def run_wasm(fixture, space, repeat=1, full=False, threads=None):
     """Roda a fixture `repeat` vezes no build WASM via node e devolve as linhas
     da mediana. None SO' quando falta build ou Node.
+
+    `threads` e' o valor PEDIDO ao runner (`--threads N` no node). None = nao
+    passa o argumento (o runner fica no padrao 1, que e' o build de producao).
+    >1 so' mede de verdade no build experimental SEEDFINDER_WASM_PTHREAD=ON; no
+    de producao o motor clampa para 1 thread em silencio (a linha registra o
+    valor pedido, nao o efetivo).
 
     O runner fala JSON em stdout (rows no mesmo formato do lado nativo, com
     `runner: "wasm"`); logs dele vao para stderr. Falha do runner (exit != 0,
@@ -502,12 +509,15 @@ def run_wasm(fixture, space, repeat=1, full=False):
         # O modo vai no payload: o runner precisa medir a MESMA janela do
         # nativo (java_mitm com --full usa [0, 2^24), nao u_timing).
         json.dump({"fixtures": [fixture], "space": space, "full": bool(full)}, f)
+    cmd = ["node", runner, "--fixtures", fx_path]
+    if threads is not None:
+        cmd += ["--threads", str(int(threads))]
     timeout = _wasm_timeout(fixture.get("mode"), repeat)
     runs = []
     for _ in range(max(1, repeat)):
         try:
-            out = subprocess.run(["node", runner, "--fixtures", fx_path],
-                                 capture_output=True, text=True, timeout=timeout)
+            out = subprocess.run(cmd, capture_output=True, text=True,
+                                 timeout=timeout)
         except FileNotFoundError:
             print("  wasm: node nao encontrado no PATH - pulando")
             return None
@@ -583,6 +593,11 @@ def main():
     ap.add_argument("--window", type=lambda s: int(s, 0), default=DEFAULT_WINDOW)
     ap.add_argument("--full", action="store_true", help="varre o espaco inteiro")
     ap.add_argument("--wasm", action="store_true", help="inclui o build WASM (node)")
+    ap.add_argument("--wasm-threads", type=_positive_int, default=None,
+                    help="threads PEDIDAS ao runner WASM (vira --threads N no "
+                         "node); padrao 1 (nao passa o argumento). >1 so' mede de "
+                         "verdade no build SEEDFINDER_WASM_PTHREAD=ON - o de "
+                         "producao clampa para 1 thread em silencio")
     ap.add_argument("--fixtures", default=None, help="so estas (virgula)")
     ap.add_argument("--json", default=None, help="caminho do JSON de saida")
     args = ap.parse_args()
@@ -637,7 +652,8 @@ def main():
         for name in chosen:
             fx = bench_fixtures.load(name)
             space = fx["space"] if args.full else min(args.window, fx["space"])
-            for row in run_wasm(fx, space, args.repeat, args.full) or []:
+            for row in run_wasm(fx, space, args.repeat, args.full,
+                                args.wasm_threads) or []:
                 row["space"] = space
                 row["extrapolated_full_ms"] = None
                 rows.append(row)
