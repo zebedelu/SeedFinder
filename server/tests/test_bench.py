@@ -477,6 +477,26 @@ def test_wasm_timeout_covers_engine_budget():
     assert bench._wasm_timeout("bedrock32", 2) > bench._wasm_timeout("bedrock32", 1)
 
 
+def test_benchmark_doc_exists():
+    path = os.path.join(os.path.dirname(__file__), "..", "BENCHMARK.md")
+    text = open(path, encoding="utf-8").read()
+    for section in ("## Metodologia", "## Resultados", "## Leitura"):
+        assert section in text, f"falta a secao {section!r}"
+    assert "parcial" in text.lower() or "timed_out" in text, \
+        "o documento tem de explicar como linhas cortadas sao tratadas"
+    # O experimento -pthread so' existe como flag no wasm/CMakeLists.txt, que e'
+    # untracked por design: sem o comando literal aqui, o numero threaded nao e'
+    # reproduzivel a partir do repo.
+    assert "SEEDFINDER_WASM_PTHREAD=ON" in text, \
+        "o doc tem de registrar a flag do build threaded"
+    assert "python server/bench.py --repeat 3 --wasm" in text, \
+        "o doc tem de registrar o comando de reproducao"
+    # O build de producao clampa para 1 thread: o leitor nao pode confundir as
+    # linhas threaded (build experimental) com o build que o site serve.
+    assert "clamp" in text.lower() or "1 thread" in text.lower(), \
+        "o doc tem de dizer que o build de producao roda em 1 thread"
+
+
 def main():
     for fn in (test_names_and_shape, test_bedrock32_fixture,
                test_auto64_fixture_has_anchor, test_java_mitm_fixture,
@@ -498,7 +518,8 @@ def main():
                test_wasm_runner_failure_is_error_row_not_none,
                test_wasm_runner_repeats_and_reduces_with_median,
                test_wasm_reduce_keeps_phase_order_and_skips,
-               test_wasm_timeout_covers_engine_budget):
+               test_wasm_timeout_covers_engine_budget,
+               test_benchmark_doc_exists):
         fn()
         print(f"  ok  {fn.__name__}")
     print("test_bench (fixtures): OK")
