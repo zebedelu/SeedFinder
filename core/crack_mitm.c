@@ -423,9 +423,11 @@ char *mitmRun(const JavaTarget *targets, int n, int maxResults, double deadline,
     for (size_t i = 0; i < nOut; i++) {
         const int *mm = c.hits[oIdx[i]].matches;
         off += sprintf(buf + off,
-            "%s{\"seed\":%llu,\"seed_str\":\"%llu\",\"score\":%lld,\"matches\":[",
+            /* seed_str vai signed: o worldseed liftado pode ter o bit 63 setado
+             * (seed negativa); unsigned o jogo rejeita e hasheia a string. */
+            "%s{\"seed\":%llu,\"seed_str\":\"%lld\",\"score\":%lld,\"matches\":[",
             i ? "," : "", (unsigned long long)oSeed[i],
-            (unsigned long long)oWorld[i], (long long)oScore[i]);
+            (long long)oWorld[i], (long long)oScore[i]);
         for (int k = 0; k < n; k++)
             off += sprintf(buf + off, "%s[%d,%d]", k ? "," : "",
                            mm[k * 2], mm[k * 2 + 1]);
