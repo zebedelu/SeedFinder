@@ -1,180 +1,144 @@
 # AGENTS.md
 
-This file provides guidance to AI coding agents working with code in this repository.
+This file guides AI coding agents in this repository.
 
 ## What this project is
 
-SeedFinder is a Minecraft Bedrock Edition **and Java Edition (latest)** structure finder that runs as a module inside [Flarial Client](https://flarial.xyz). Given a world seed and the player's position, it locates nearby villages, temples, monuments, ancient cities, etc. — without relying on ChunkBase — by driving [cubiomes](https://github.com/Cubitect/cubiomes) directly (Bedrock via `Bfinders` overrides, Java via cubiomes' own `getStructurePos`).
+SeedFinder finds Minecraft **Bedrock** and **Java** structures (villages, monuments, ancient cities, …) given a world seed + player position. It drives [cubiomes](https://github.com/Cubitect/cubiomes) directly — Bedrock via the `Bfinders` overrides, Java via cubiomes' own `getStructurePos`. It ships as (a) a REST API and (b) a Flarial Client overlay script.
 
-`README.md` is the user-facing reference: full API docs (params, response shapes), the supported-structures list, and real benchmark tables (v1.0.0 and v1.2.0). Point users there for API questions instead of re-deriving from code.
-
-This repository is responsible for compiling the native libraries (`.dll` and `.so`). The `.so` is consumed by an external repository called **`mineseedfinder`**, deployed on Vercel (`https://www.mineseedfinder.com`) to distribute the product for free. It exposes a `/scan` endpoint so the seedfinder can be tested; SeedCracker is available **only via WASM**, since running it as a server API would be too expensive on the Vercel runtime. The site's `/scan` console **runs the same WASM module** (scan export, added 2026-09-25), so each Scan costs the Vercel serverless nothing — the HTTP route stays for API consumers (see "WASM (browser build)").
+This repo builds the native libraries (`.dll` / `.so`). The `.so` is consumed by the sibling **private** repo `mineseedfinder` (site `https://www.mineseedfinder.com`). `README.md` is the user-facing + API reference — point API questions there instead of re-deriving shapes from code.
 
 ## Architecture
 
 ```
-Flarial Lua Script  ──HTTP──>  Flask API (127.0.0.1:7890)  ──ctypes──>  seedfinder_lib.{dll,so}
-   script/SeedFinder.lua         server/index.py                          core/seedfinder_wrapper.c
-   (ImGui overlay)               (loads DLL/.so, JSON I/O)                (links cubiomes + Bfinders)
+script/SeedFinder.lua  --HTTP-->  server/app/ (Flask, :7890)  --ctypes-->  core/ -> seedfinder_lib.{dll,so}  -->  cubiomes + Bfinders
 ```
 
-There is a **single Flarial Lua module** in `script/`:
+- `script/SeedFinder.lua` — the only Flarial Lua module. `STRUCTURE_TYPES` (string ↔ int ID) + `STRUCTURE_ICONS`. Empty **Server URL** field ⇒ hosted API (`https://www.mineseedfinder.com`); otherwise the typed URL (e.g. local `http://127.0.0.1:7890`). Install path in `script/INSTALL.txt`.
+- `server/` — one Flask app package (`server/app/`) + `server/index.py` WSGI shim. The same code runs in every deployment.
+- `core/` — the C engine (see *Engine*).
 
-- `script/SeedFinder.lua` — points at `https://www.mineseedfinder.com` (hosted API) when the **Server URL** field is left empty, or at whatever URL the user types (e.g. the local `http://127.0.0.1:7890` server, the packaged Windows path with `SeedFinder.exe`).
+## Three build trees (don't mix their outputs)
 
-1. **C core** (`core/`) — Structure-finding engine. Two parallel implementations:
-   - `core/seedfinder_wrapper.c` — plain C entry point. Exports `seedfinder_scan` (Bedrock, unchanged ABI), `seedfinder_scan_java` (Java; extra `const char *mcLabel` arg, always `NULL` today — the future hook for a game-version param, resolved via cubiomes' `str2mc`), plus `seedfinder_free_result`, `seedfinder_status`. Both scans share one internal loop, `scan_impl(..., edition, mcLabel)` (in `core/seedfinder_wrapper.c`), with 4 edition dispatch points: `setupGenerator` mc, structure config, placer (`getBedrockStructurePos` vs `getStructurePos`), biome gate (`structureIsViable` vs `isViableStructurePos`). This is what the Python server loads. It also holds the entire **SeedCracker** engine (`seedfinder_crack`) — see "SeedCracker" below.
-   - `core/SeedFinderBridge.cpp` / `.h` — alternative C++ entry point that registers a `seedfinder_bridge` Lua global inside a Lua state (for an in-process Flarial DLL injection path that is **not** built by the current `start.bat` target — see "Three build trees" below).
-   Both share the same algorithm: iterate regions = `floor(playerChunk ± radius) / regionSize`, call the edition's placer (`getBedrockStructurePos` on Bedrock, `getStructurePos` on Java), run the edition's biome gate (`structureIsViable` on Bedrock, `isViableStructurePos` on Java), sort by distance. Floor-div helper is duplicated in both files. `seedfinder_wrapper.c` additionally special-cases **Outpost**: it re-samples the biome at the outpost's own placement cell (offset from the structure position) because cubiomes' upstream Java-style gate lets positions sitting on swamp/river biomes through.
-
-2. **HTTP server** (`server/`) — Flask + flask-cors, loads the native library via `ctypes.CDLL`. Blueprints in `server/app/`: `api.py` (`GET /status` aliased as `GET /health`; scan routes `GET|POST /scan`, `GET|POST /scan/java`, `GET|POST /scan/bedrock` — params `seed/x/z/radius/max/types` plus `mc` on `/scan` only), `seedcracker.py` (the `/seedcracker` reverse-seed-search API), `pages.py` (a **single** `/` landing page with copy-paste API examples — the SEO/doc routes and HTML templates were deleted with the Vercel deployment). Reads the malloc'd JSON in the C side, calls `seedfinder_free_result` to release it.
-
-3. **Flarial Lua module** (`script/SeedFinder.lua`) — Runs inside Flarial Client. Pings `http://127.0.0.1:7890/status` (5 s throttle), then calls `/scan`. Renders an ImGui overlay with structure type toggles and results sorted by distance. Reads the player's current seed/position from the Flarial runtime. Drop into `%LOCALAPPDATA%\Flarial\Client\Scripts\Modules\SeedFinder.lua` to load (see `script/INSTALL.txt`).
-
-## SeedCracker (Bedrock layout seed search)
-
-The layout search: given ≥4 structures with target block coordinates, find the Bedrock seeds that generate them there. Sweeps the 32-bit seed space in native C, multi-threaded, inside a time budget. Lives in `server/app/seedcracker.py` (blueprint) + the crack engine at the bottom of `core/seedfinder_wrapper.c` (`seedfinder_crack`).
-
-- **Route** `/seedcracker` is **API-only** now: POST JSON (object or list-of-items form) or GET with `?structures=5,-280,152;8,696,360`. A bare GET without structures returns a 400 error list — the HTML console and `/seedcracker/documentation` were deleted with the templates.
-- **Response is always a JSON *list***, unlike `/scan`'s object: item 0 is the header `{"status": "ok"|"partial"|"error", "checked", "elapsed_ms", "timed_out", ...}`, then `{"seed", "score", "matches": [[x, z], ...]}` per candidate. `partial` means the `max_seconds` budget (default 30, 1–120) expired before the sweep finished.
-- **Constraints**: 4–24 structures; `tolerance` 0–8 chunks (default 6, lower = stricter); Mineshaft (type 15) rejected (per-chunk RNG, not region-crackable); `max` default 500 (cap 2000); `start`/`end` bound the seed range (default the full 32-bit space). Only types 1–11, 13, 14, 23, 24 are crackable.
-- **Local-only**: this route exists only when running the local server (`server/start.bat` or `server/start.sh`). On the hosted Vercel deployment it is **not** exposed as an API — the reverse seed search ships **only** via the WASM build (see "WASM (browser build)"), because running it server-side would be too expensive on the Vercel runtime.
-- **Engine notes**: Win32 threads on Windows (DLL stays self-contained under MinGW, no pthread link), pthreads on Linux (CMake `find_package(Threads)`). A lane-generic SIMD path (`crack_mt_block`, `core/crack_simd.h`) scores **`CRACK_WIDTH` seeds per call** — 128 on AVX2 (8 lanes × `CRACK_GROUPS=16`), 16 on WASM SIMD128 (4 lanes × 4) — runtime-dispatched via `crackSimdDetect()` (`__builtin_cpu_supports("avx2")` natively, compile-time on WASM) with a scalar fallback. Targets are sorted fewest-candidate-regions-first (strongest filter early — 1.9× on the sweep once the AVX2 lanes were saturated). Validation errors are returned as `{"error": ...}` JSON. `core/CMakeLists.txt` forces `CMAKE_BUILD_TYPE=Release` when unset: an empty build type left the DLL at `-O0`, ~6× slower on the crack (2.8M vs 17M seeds/s).
-- **64-bit mode** (`core/crack64.c`, exported via `seedfinder_crack64_shim` in `seedfinder_wrapper.c`): cracks the full Bedrock seed (< 2^63) in a 4-stage pipeline — (1) Java-style anchors (Trail Ruins 23 / Trial Chambers 24) via a fast-path LCG whose parity with cubiomes `getStructurePos` is pinned by `core/test_crack64.c` (test = truth source), (2) a **bounded** 2^48 residual sweep (`sweep48MT`; span ≥ 2^48 = full sweep — ≈65k× the 32-bit space, thousands of core-hours per core unparallelized, so callers must pass a narrow window), (3) MT cross against the low-32-bit placements of regular Bedrock structures, (4) 2^16 high-bit **biome lift** through the shared `structureIsViable` gate. Thread helpers (`crackThreadCreate/Join`, `nowms_s`) live in `core/platform_threads.h`; the Emscripten branch of `sweep48MT`/`liftJavaHi` forces 1 inline thread like the 32-bit engine. crack64 emits matches in **blocks** (the 32-bit crack emits chunks); each candidate also carries `seed_str` because 64-bit seeds exceed JS safe integers. Empirical grounding: `docs/verification/bedrock64-empirical.md`.
-- **64-bit dispatch by span** (`seedfinder_crack64`): `span = end - start < 2^32` → the bounded path above; `span ≥ 2^32` → **full-range**: sample pre-check on 2^22 seeds + full lo32 sweep (`sweepMtSurvivors`, 2^32 × ~150 µs/seed-8 targets on 6 threads ≈ 5–7 min) + Java lift 32→48 (`liftJavaHi`, parallel over survivors). `types` dispatch, `max_seconds` cap for 64-bit is `MAX_MAX_SECONDS_64 = 2400` (the 32-bit cap stays 120).
-- **Full-range is only feasible with NEAR-EXACT Java anchors** — this is the key empirical finding (`build_server/probe_tol.c`, 6 threads, i5-class laptop). Stage 4 pays `#s48 × 2^16 × ~150 µs` (`applySeed` + biome gate) to resolve the top 16 bits, so the Java lift must yield very few 48-bit candidates: tol 0 → ~1 s48 (seconds); tol 2 → 2 176 s48 → ~1 h; tol 3 → ~9 h; tol 6 → ~95 M s48 → **years**. Two guards (sampled Java yield before the full lift, plus a post-lift estimate) turn that into an instant actionable `{"error": "... pass a start/end window ... or exact Trial Chambers/Trail Ruins coordinates"}` instead of a hang. Approximate Chunkbase coordinates therefore require a window; full-range recovery with exact anchors is proven by `core/test_crack64.c` (`SEEDFINDER_FULL_RANGE_TEST=1` → `FULL_RANGE_OK`), and the guard itself by `server/tests/test_crack64_api.py::test_full_range_guard`.
-- **`mtFilterBits` was deleted**: the analytical bits estimate (sum of `2·log2(regionSize)`) over-predicted the filter (said 40 bits for a 4-MT set that really left ~2.7M lo32 survivors) and has been replaced by a **sampled** pre-check (sweep 2^22 seeds ≈ 1 s, extrapolate survivors ×1024, reject above the exact `2^20` post-check gate).
-- **Breaking change (clients)**: `/seedcracker` **auto-detects 64-bit mode when `end` > 2^32** (or `"mode": "64"` explicit, POST JSON only; GET stays 32-bit). 32-bit clients that passed an upper bound beyond 2^32 now hit the 64-bit engine (or a 503 on a stale lib) instead of a wrapped 32-bit sweep.
-- **Java tolerant LIFTING (REMOVIDO)**: o ramo tolerante de full-range era *unsound* (o pré-filtro representativo `sRep=(hiBase<<32)|lo32` descartava seeds cujo hi16 difere) e foi removido. Full-range com `tolerance > 0` agora retorna `{"error":"... is not supported (unsound tolerant lift) ..."}`; com `tolerance 0` sem estrutura uniforme não-potência-de-2 retorna um erro pedindo janela `start/end`. `MAX_MAX_SECONDS_JAVA = 2400` na API.
-- **MITM Java** (`seedfinder_crack_java` dispatch; export `seedfinder_crack_mitm`; `core/crack_mitm.c`): caminho exato para `tolerance 0` + estruturas uniformes não-potência-de-2 (Village, templos, Igloo, Ocean Ruin, Shipwreck, Outpost, Ruined Portal, Trail Ruins, Trial Chambers; Ancient City entra só como verificador por ser potência de 2). Meet-in-the-middle sobre os 48 bits (`S = U·2^L + Lo`, `L=24`): LUT de `(carry, lc0, lc1)` por `Lo` numa chave empacotada radix-misto, sweep de `U` com DFS/busca binária (ramifica carry e o overflow `2^48`, `C = 2^31 mod n`), confirmação final por `javaCheckSeed` (zero falso-positivo). Gate de bits ≥ 40; estimativa ≈ `2^(48−bits)`. Fase 2 faz o lift dos 16 bits altos via `isViableStructurePos` e emite `seed_str` (string decimal; fallback = a própria s48). Algoritmo de **Matthew Bolan (mjtb49)**, reimplementação clean-room (o gist não tem licença).
-
-## WASM (browser build: scan + SeedCracker)
-
-`wasm/CMakeLists.txt` compiles `core/seedfinder_wrapper.c` + `core/crack64.c` + `core/crack_mt.c` + `core/crack_mitm.c` + `ChunkBiomesGUI/Bfinders.c` + cubiomes sources **directly** (no DLL link) with Emscripten into `wasm/out/seedfinder.{wasm,js}` (ES6 modularized glue). The `core/crack_mt.c` entry is **mandatory** (added 2026-09-17): without it the link fails on `sweepMtSurvivors`/`crackScoreSimd`. Design docs: `docs/superpowers/{specs,plans}/2026-09-05-wasm-seedcracker*.md`; **`wasm/INTEGRATION.md` is the self-contained reference** for consuming the module (ABI table incl. the scan, JS validation mirroring the site's `/scan` route, worker scheduler, memory discipline, site migration checklist) — read it before touching the wasm side. **The whole `wasm/` folder is gitignored and untracked since 2026-09-29** (the former force-tracked `CMakeLists.txt`/`test_wasm.mjs`/`INTEGRATION.md` were `git rm --cached`'d; `build_wasm.bat/.sh` were never tracked) — nothing under `wasm/` may be committed; the docs/test mirrors live in `mineseedfinder/static/wasm/`. `docs/` is gitignored too, with `docs/verification/bedrock64-empirical.md` as its one force-tracked exception. Build with one click: `wasm/build_wasm.bat` (Windows, double-click) / `wasm/build_wasm.sh` (MSYS2 bash) - both auto-detect the MSYS2 UCRT64 Emscripten (`C:\msys64\ucrt64\lib\emscripten`, which is where `emcc.bat`/`emcmake.bat` live; the `.exe` variants are `.broken`; plus `ucrt64\bin`), build incrementally by default, and accept `clean`/`test`/`nopause` flags. Editor heads-up: the `.bat` must use `call emcmake` (emcmake is itself a `.bat`) - without `call` the script ends there and `cmake --build` never runs, which was the old "silent no-op".
-
-- **Exports** `_seedfinder_crack`, `_seedfinder_crack64_shim`, **`_seedfinder_crack_mitm`** (added 2026-10-06 — the Java MITM structure-seed recovery), **`_seedfinder_scan`**, **`_seedfinder_scan_java`** (added 2026-09-25 — the module now serves the site's `/scan` console in-browser too, so each Scan costs the Vercel serverless nothing), `_seedfinder_free_result`, `_malloc`, `_free`, `_seedfinder_biome_grid`, `_seedfinder_biome_palette` (added 2026-10-02 — biome map: Int32 grid the caller `_malloc`s/`_free`s + JSON palette freed with `seedfinder_free_result`; both sampled at y=79; rc/validation limits in INTEGRATION.md §3.6/§3.7). Output was renamed `seedcracker.*` → **`seedfinder.*`** (both build scripts delete a stale `out/seedcracker.*` pair); the site migration (copy + worker import + `/scan` fallback) is INTEGRATION.md §10.2.
-- **Auto-mode exports** (added 2026-09-26): `_seedfinder_crack_auto_sweep` (placement-only ranked lo32 sweep — no biome gate, which is the fix for defect #2), `_seedfinder_crack_auto_lift48` (direct32 detection + 32→48 lift via Java anchors, guard `nS48 > 1024` → actionable error) and `_seedfinder_crack_auto_lift63` (48→63 biome lift, `seed_str` always present); `crack_auto.c` is in the wasm source list and `HEAP64` in `EXPORTED_RUNTIME_METHODS` — ABI tables in INTEGRATION.md §3.3–3.5, guard in §7, `BigInt64Array` pitfall in §11.8.
-- **Scan ABI gotchas**: the C `scan_impl` **does not validate input** (unlike crack, which returns `{"error":...}`) — defaults/clamps/`missing_or_invalid` live in the caller and must mirror the site's `app/api.py::_scan` (INTEGRATION.md §10.4); `seed` is **BigInt** (`& 0xFFFFFFFFFFFFFFFFn`, accepting negative seeds like Python); no `timeBudgetSec` — worst case measured ~370 ms (radius 200, 11 types) and it still must run in a worker; `mcLabel` is passed as `0` (NULL) today.
-- **Emscripten-safety constraint on committed code**: `seedfinder_crack` has an `#if defined(__EMSCRIPTEN__)` path (line ~619 of `seedfinder_wrapper.c`) that forces `numThreads = 1` and runs the worker **inline** — the same branch exists in `sweep48MT` (`core/crack64.c`); the WASM build has no `-pthread`; JS parallelizes via Web Workers per seed-range slice (reference pattern in `wasm/INTEGRATION.md` §6). Keep this path compiling when refactoring the engine.
-- **ABI gotchas**: `WASM_BIGINT` → `startSeed`/`endSeed` are **BigInt** in JS; input coordinates are **blocks**, not chunks; `_seedfinder_free_result(ptr)` is mandatory on **every** return (error strings are `strdup`'d too); the call is synchronous/blocking — never on the main thread, use the `timeBudgetSec` budget for cooperation.
-- **WASM SIMD128**: the WASM build uses `-msimd128` (compile + link) to enable the vectorized `crackScoreSimd` path. `core/crack_simd.h` is the single source of truth: it maps a small `CV_*` macro shim to **AVX2 8-lane** on x86 and **WASM SIMD128 4-lane** on wasm, and defines `CRACK_SIMD`/`CRACK_LANES`/`CRACK_GROUPS`/`CRACK_WIDTH`. Without the flag `__wasm_simd128__` doesn't exist and the engine falls back to scalar (~2× slower: measured 1.046M → 2.06M checked/s, `node wasm/test_wasm.mjs`). **`wasm/CMakeLists.txt` (local-only, untracked)** carries `-msimd128` (and `-sSTACK_SIZE=1048576`, required by `CRACK_GROUPS=4`), so the local tree builds WASM without re-adding flags; the mandatory `core/crack_mt.c` source line is in the same file. The link stays at `-O1` (binaryen workaround).
-- **`CRACK_GROUPS` é por ISA** (`core/crack_simd.h`): **16** em x86 GCC/AVX2, **4** em WASM SIMD128, 1 nos demais. A cadeia de init do MT (`crack_mt_block`) é latência-bound no multiply; grupos independentes dão ILP. Medido (min-time, fixture tol6): AVX2 `GROUPS=12–16` ≈ 1,5× sobre 4 (20+ regride por spill); WASM `GROUPS>4` cai para ~0,6× (spill na linear memory) — por isso o WASM fica em 4. `crack_mt_block` usa uma **janela rolante** (guarda só `array[0..4]` e `array[397..400]`, não as 401 palavras) — é o que permite `GROUPS` alto sem estourar cache; com o array `[401]` original, `GROUPS=16` ficava 0,46×.
-- **Known toolchain gotchas** (see comments in `wasm/CMakeLists.txt`): links at `-O1` because the MSYS2 `wasm-opt`/binaryen pass wedges at 0 CPU on Windows when spawned by emcc (LLVM `-O3` does the real optimization); and `ChunkBiomesGUI/Brng.h` RNG functions (`_mNext`, `mNextInt`, …) must **not** carry `PURE_FUNC` — they mutate the MersenneTwister, and clang CSEs repeated same-pointer calls under optimization, making the RNG repeat values (the "wasm divergence" bug fixed in commit `4165bcb`). Don't re-add the attribute.
-
-## Server entrypoint
-
-Flask server code lives in **one** tree — `server/app/` (package) + `server/index.py` (WSGI shim). The same code runs in every environment:
-
-| Entry | When used | Native lib |
-|---|---|---|
-| `server/index.py` + `server/app/` | Local dev via `server/start.bat` / `server/start.sh`, and `SeedFinder.exe` via `server/build_exe.py` | Auto-detected by `app/native.py` (`_candidates()`), first existing wins: `sys._MEIPASS` (frozen exe), then `server/build_server/seedfinder_lib.{dll,so}` and `server/build_server/libseedfinder_lib.so`. **Gotcha:** the auto-detect paths point at `server/build_server/`, which `start.bat` never fills — it builds the repo-root `build_server/` and `index.py` loads that via the explicit `--lib-path` flag. So `bootstrap_lib()` at import typically finds nothing on a dev machine; the dev flow relies on `index.py`'s explicit load. The test scripts also force the DLL path explicitly. |
-
-The app package bootstraps ctypes at **import time** (`app/__init__.py` → `native.bootstrap_lib()`) — this matters for the frozen `SeedFinder.exe`, where the lib must be discoverable via `_MEIPASS`.
-
-## Three build trees
-
-There are **three separate CMake projects** — they do not share build output:
-
-| Tree | Root | Output | Purpose |
+| Tree | Invoked by | Output | Purpose |
 |---|---|---|---|
-| `core/CMakeLists.txt` | invokable via `server/start.bat` (Windows) or `server/start.sh` (Linux) | `build_server/seedfinder_lib.dll` (Win) or `seedfinder_lib.so` (Linux) | The native lib the Python server loads. Note **Linux filename is `seedfinder_lib.so` without `lib` prefix** — `core/CMakeLists.txt` sets `PREFIX ""`. Links `seedfinder_wrapper.c`. |
-| `CMakeLists.txt` (root) | standalone, experimental | `seedfinder_bridge.lib` / `seedfinder_bridge.dll` | For linking `SeedFinderBridge.cpp` into a Flarial DLL. **Not** used by the current Lua networking path. |
-| `wasm/CMakeLists.txt` | `wasm/build_wasm.bat` / `.sh` (Emscripten; sources tracked, `wasm/` otherwise **gitignored**) | `wasm/out/seedfinder.wasm` + `seedfinder.js` | Browser build of the scan + SeedCracker engines — see "WASM (browser build)" below. |
+| `core/CMakeLists.txt` | `server/start.bat` (Win) / `server/start.sh` (Linux) | `build_server/seedfinder_lib.dll` \| `.so` | The lib the Python server loads. **Linux name has no `lib` prefix** (`PREFIX ""`). |
+| root `CMakeLists.txt` | standalone, experimental | `seedfinder_bridge.lib` \| `.dll` | In-process Flarial DLL bridge (`core/SeedFinderBridge.cpp`). **Not** used by the Lua networking path; not built by `start.bat`. |
+| `wasm/CMakeLists.txt` | `wasm/build_wasm.bat` / `.sh` | `wasm/out/seedfinder.{wasm,js}` | Browser build (scan + SeedCracker). The whole `wasm/` folder is gitignored/untracked — never commit it. |
 
-When editing the engine, you usually only need `core/seedfinder_wrapper.c`. The root `CMakeLists.txt`, `core/SeedFinderBridge.cpp/.h`, and `core/test_bridge.c` are an alternate in-process path that isn't wired to anything in `script/`.
+`core/CMakeLists.txt` forces `CMAKE_BUILD_TYPE=Release` when unset: an empty build type left the DLL at `-O0` (~6× slower crack). Keep it.
 
-## Common commands
+## Commands
 
-### Build & run (Windows — primary dev env)
+### Build + run (Windows — primary dev env)
 
 ```bat
-:: Build DLL + start server (dev). Expects MSYS2 UCRT64 on PATH (start.bat prepends it).
 server\start.bat
-
-:: Freeze server + DLL into SeedFinder.exe for distribution
-python server\build_exe.py
-:: Then: server\dist\SeedFinder.exe [--port 8080 --host 0.0.0.0]
 ```
 
-`server/start.bat` does, in order: prepends MSYS2 **UCRT64** (`C:\msys64\ucrt64\bin`) to PATH — the toolchain **must** be UCRT64, not the legacy 32-bit MinGW.org gcc, whose DLL a 64-bit Python refuses with WinError 193. It then runs `cmake -G "MinGW Makefiles" -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -S ../core -B .`, `mingw32-make`, then launches `python server\index.py --lib-path build_server\seedfinder_lib.dll`.
+`start.bat`: prepends MSYS2 **UCRT64** (`C:\msys64\ucrt64\bin`) — the toolchain **must** be UCRT64, not legacy MinGW.org gcc (its DLL makes 64-bit Python fail with WinError 193); runs `cmake -G "MinGW Makefiles" -S ../core -B .` + `mingw32-make` into the **repo-root** `build_server/`; then `python server\index.py --lib-path build_server\seedfinder_lib.dll`. It wipes `build_server/` only if the cached CMake compiler isn't ucrt64/mingw64; otherwise incremental.
 
-`start.bat` wipes `build_server/` and rebuilds from scratch if the cached CMake build was produced by a different compiler (it greps `CMakeCache.txt` for `ucrt64`/`mingw64`); otherwise it keeps the incremental build.
-
-### Build & run (Linux — dev / alternate local server)
+### Build + run (Linux)
 
 ```bash
-# user builds inside VirtualBox Kali VM (no WSL): toolchain is gcc 14.2 / cmake 4.3.3
-sudo apt install -y build-essential cmake python3 python3-pip
-pip install --user flask flask-cors
-
-cd ~/SeedFinder
-mkdir -p build_server && cd build_server
-cmake -S ../core -B .
-make -j$(nproc)
-# Output: build_server/seedfinder_lib.so  (note: NO 'lib' prefix)
+cd build_server && cmake -S ../core -B . && make -j$(nproc)   # -> build_server/seedfinder_lib.so
+server/start.sh                                                # automates the above + runs index.py --lib-path
 ```
 
-`server/start.sh` automates the above then launches `python server/index.py --lib-path build_server/seedfinder_lib.so`. **CRLF gotcha:** if `start.sh` is rewritten via the Windows-side Edit tool, run `sed -i 's/\r$//' server/start.sh` before executing — otherwise bash hits `^M` and fails on the shebang line. `start.sh` was first shipped with CRLF and broke on first run; user worked around manually.
+CRLF gotcha: if `server/start.sh` is ever rewritten via the Windows editor, run `sed -i 's/\r$//' server/start.sh` first or bash fails on `^M`.
 
-### Smoke-test the running server
+### Package the Windows exe
+
+```bat
+pip install -r server/requirements.txt -r server/requirements-build.txt
+python server\build_exe.py        REM -> server\dist\SeedFinder.exe
+```
+
+Optional Authenticode signing when `SEEDFINDER_SIGN_THUMBPRINT` or `SEEDFINDER_SIGN_PFX` (+ `SEEDFINDER_SIGN_PFX_PASSWORD`) is set (needs `signtool.exe`); unsigned builds skip, but a **configured-but-broken** signing run fails the build.
+
+### Smoke-test a running server
 
 ```bash
 curl "http://127.0.0.1:7890/status"
 curl "http://127.0.0.1:7890/scan?seed=8675309&x=0&z=0&radius=100&max=20&types=5,1,10"
 ```
 
-### Tests
+### WASM
 
-`server/tests/` holds 11 assert-based Python scripts (no framework, run directly), plus `fixtures_crack64.json` (64-bit field data). The two most-used:
-- `python server/tests/test_native_crack.py` — ctypes smoke test against `build_server\seedfinder_lib.dll`; recovers fixture seeds 8675309 and 31415.
-- `python server/tests/test_seedcracker.py` — Flask test client covering 400 validation, Mineshaft rejection, and the happy path (seed 8675309) across the object/list/GET/chunks payload forms. It forces the Windows DLL via `native.load_lib(...)` *after* `create_app()`, because the factory re-runs `bootstrap_lib()` which won't auto-find the repo-root build.
-- Remaining scripts (all run directly): `test_scan_api.py`, `test_scan64.py`, `test_scan_java_native.py`, `test_scan_village_groundtruth.py`, `test_seedcracker_java.py`, `test_crack_auto.py`, `test_crack64_api.py`, `test_mitm_window.py`, `test_biome_grid.py`.
+`wasm/build_wasm.bat` (double-click) / `wasm/build_wasm.sh` (MSYS2 bash) auto-detect the UCRT64 emscripten; build incrementally by default; accept `clean`/`test`/`nopause`. Verify with `node wasm/test_wasm.mjs` (Node ≥ 18). `wasm/INTEGRATION.md` is the consuming reference.
 
-`core/test_bridge.c` is a one-shot harness that links the **root** tree's `SeedFinderBridge.cpp` — it is **not** exercised by `start.bat`. To run it manually you need to build the root `CMakeLists.txt` with `-DSEEDFINDER_BRIDGE_SHARED=OFF`, link against a Lua (`C:/msys64/mingw64/include/lua.hpp`), then invoke `./test_bridge.exe`.
+### CI
 
-Third assert-based test: `node wasm/test_wasm.mjs` (Node ≥ 18) — drives `wasm/out/seedfinder.js` via the real ABI (BigInt, HEAP32/HEAPF64, mandatory frees) and recovers fixture seed 8675309; includes a native-DLL parity probe, the scan ground-truth regression (seed 6666 / 8 villages, mirroring `server/tests/test_scan_village_groundtruth.py`), Bedrock+Java scan parity probes, and the crack64 smoke. Requires building the WASM first (`wasm/build_wasm.bat` / `.sh`).
+`.github/workflows/build-lib.yml` — **manual-only** (`workflow_dispatch`, click "Run workflow"). Builds the Linux `.so` on `ubuntu-latest`, smoke-tests, uploads the `seedfinder-lib` artifact. Download it and commit the `.so` to the **root of `mineseedfinder`** (Vercel picks it up). `server/tests/` is Windows-only and is *not* run in CI.
 
-### GitHub Actions: `.github/workflows/build-lib.yml`
+## Engine (core/)
 
-Manual-only workflow (`workflow_dispatch`, click "Run workflow") that builds the Linux `.so` on `ubuntu-latest` so nobody has to spin up a Linux box: `cmake -S core -B build_server` → smoke test (loads `build_server/seedfinder_lib.so` explicitly, asserts `seedfinder_crack`/`seedfinder_crack64_shim`/`seedfinder_scan_java`, hits `/status`, `/scan`, `/scan/java`) → uploads the `seedfinder-lib` artifact. Download the artifact and commit the `.so` to the **root of `mineseedfinder`** (where Vercel picks it up). The `server/tests/` scripts stay Windows-only (hardcoded `.dll` path) and are not part of the workflow.
+Files: `seedfinder_wrapper.c` (export surface + `scan_impl`), `viability.c` (Bedrock biome gate), `crack_mt.c` (shared Bedrock placement MT + SIMD), `crack64.c` (64-bit pipeline), `crack_java.c` (Java 48-bit + MITM dispatch), `crack_mitm.c` (Java MITM), `crack_auto.c` (auto-mode), `crack_simd.h`, `platform_threads.h`, `SeedFinderBridge.cpp/.h` (alternate C++ path).
 
-## Prerequisites
+ctypes-bound exports (`server/app/native.py`): `seedfinder_scan`, `seedfinder_scan_java`, `seedfinder_free_result`, `seedfinder_status`, `seedfinder_crack`, `seedfinder_crack64_shim`, `seedfinder_crack_java`, `seedfinder_biome_grid`, `seedfinder_biome_palette`. WASM additionally exports `_seedfinder_crack_mitm`, `_seedfinder_crack_mitm_window`, `_seedfinder_crack_auto_{sweep,lift48,lift63}`.
 
-- **Windows dev**: MSYS2 **UCRT64** toolchain (`gcc`, `g++`, `mingw32-make`) — the 64-bit gcc that `server/start.bat` prepends; Python 3.11+ (64-bit, to load the 64-bit DLL) with `pip install -r server/requirements.txt` (plus `-r server/requirements-build.txt` only to build the exe); Flarial Client (only to test the Lua module).
-- **Linux build**: `gcc`, `make`, `cmake`, Python 3 with `flask flask-cors`. Run inside a Debian-family VM — no WSL installed.
-- **For the in-process `SeedFinderBridge` path** (root `CMakeLists.txt`): a Lua development install at `C:/msys64/mingw64` and optionally `FLARIAL_SDK_PATH` set. Not used by the main Lua networking path.
-- **For the WASM build**: `pacman -S mingw-w64-ucrt-x86_64-emscripten` inside MSYS2 UCRT64 (or the official emsdk — commands are identical); Node ≥ 18 to run `wasm/test_wasm.mjs`.
+- `scan_impl(..., edition, mcLabel)` — one loop, **4 edition dispatch points**: `setupGenerator` mc, structure config (`getStructureConfig` vs `getBedrockStructureConfig`), placer (`getStructurePos` vs `getBedrockStructurePos`), biome gate (`isViableStructurePos` vs `structureIsViable`).
+- **Bedrock gate**: `structureIsViable` (wrapper) → own-cell check → `bedrockViableBiome` (`core/viability.c`, per-type table). Do **not** use cubiomes' Java-style `isViableStructurePos` alone as the Bedrock filter — it lets river/swamp/ocean through. (The old Outpost-only special case is gone; the own-cell check is now generalized.) Regression: `server/tests/test_scan_village_groundtruth.py` (seed 6666, radius 100, `types=5`).
+- **`scan_impl` does not validate input** — defaults/clamps/`missing_or_invalid` live in Python (`server/app/api.py::_scan`) and must be mirrored by any other caller. `seed` is folded into an unsigned 64-bit value; `radius`/`max` clamp to 1000.
+- `seedfinder_free_result` is mandatory on **every** return (the server does it in a `finally`; error strings are `strdup`'d too).
 
-## Key files
+### SeedCracker
 
-- `core/seedfinder_wrapper.c` — the export surface the server actually calls (`seedfinder_scan`, `seedfinder_scan_java`, `seedfinder_free_result`, `seedfinder_status`, `seedfinder_crack`)
-- `server/app/native.py` — ctypes signature table + `_candidates()` auto-discovery of the native lib (`.dll`/`.so`); `seedfinder_crack` is bound **only if the symbol exists** (`hasattr`), so a stale lib (pre-SeedCracker) degrades instead of killing the app at import
-- `server/app/__init__.py` — `create_app()` factory; `native.bootstrap_lib()` at import
-- `server/app/api.py` — `/status` (alias `/health`), the three scan routes (`/scan`, `/scan/java`, `/scan/bedrock`, GET+POST); `_scan(fixed_edition)` is the shared handler
-- `server/app/seedcracker.py` — `/seedcracker` blueprint (API only, `_parse()` for the payload forms); see "SeedCracker"
-- `server/app/pages.py` — a single `/` landing page with inline HTML: interactive forms for both `/scan` and `/seedcracker` plus copy-paste curl/Python examples; the previous SEO/doc routes were removed with the Vercel deployment
-- `server/app/console.py` — ASCII startup banner + ANSI/UTF-8 console setup for `SeedFinder.exe` / `start.bat`; also the **update notice**: the frozen exe compares `APP_VERSION` (bump it when cutting a release — tag `vX.Y.Z` must match) with the latest GitHub release and prints a highlighted box linking the releases **page**. It is deliberately notice-only — no prompt, no download, no self-swap/PowerShell relaunch (the old auto-updater was an AV false-positive signal; don't re-add it)
-- `server/index.py` — WSGI shim (`app` for the frozen exe + `--lib-path/--port/--host` CLI for local dev; port also via `SEEDFINDER_PORT` env); calls `console.print_banner` on local runs
-- `server/build_exe.py` — PyInstaller builder; bundles the DLL plus the `logo/` icon into `server/dist/SeedFinder.exe` (single-file, `--console`). Optionally Authenticode-signs it (`_sign_exe`) when `SEEDFINDER_SIGN_THUMBPRINT` (cert store/USB token) or `SEEDFINDER_SIGN_PFX` (+`SEEDFINDER_SIGN_PFX_PASSWORD`) is set — needs `signtool.exe` from the Windows SDK; unsigned builds just print a skip hint, but a configured-but-broken signing run **fails the build**. There are no `templates/` or `static/` dirs anymore — deleted with Vercel.
-- `script/SeedFinder.lua` — `STRUCTURE_TYPES` map (string ↔ int ID), `STRUCTURE_ICONS`, ImGui rendering; empty Server URL = hosted API, otherwise the typed URL (see "Architecture")
-- `ChunkBiomesGUI/cubiomes/` — vendored cubiomes source; `ChunkBiomesGUI/Bfinders.c` — Bedrock-specific structure overrides, compiled in statically; `ChunkBiomesGUI/Brng.h` — Bedrock RNG (see the PURE_FUNC gotcha under "WASM (browser build)")
-- `wasm/{CMakeLists.txt,build_wasm.bat,.sh,test_wasm.mjs,INTEGRATION.md}` — the browser build of scan + SeedCracker (entire folder gitignored/untracked since 2026-09-29 — never commit it; docs+test mirrors live in `mineseedfinder/static/wasm/`); `wasm/INTEGRATION.md` is its local reference doc (incl. the site-side integration checklist)
-- `build_server/seedfinder_lib.dll` — the build artifact `/scan` loads, produced by `server/start.bat` into `build_server/` (gitignored)
+> **Regra (vale nos dois repos): a seed COMPLETA é sempre a prioridade.** A saída de um cracker só tem valor se for a **seed completa** — o valor exato que o jogo aceita no campo de seed. Resultado **parcial não é aceitável**: "só os 48 bits baixos" não serve, porque sem os bits altos o usuário não reproduz biomas/terreno (só as estruturas). A **representação** também conta: uma seed negativa impressa em unsigned (`%llu`) é inutilizável — o jogo rejeita a string fora do range signed e a hasheia → outro mundo. Nunca marque um export/caminho de crack como pronto se ele entregar menos que a seed completa na forma que o jogo aceita.
 
-## Ground-truth structures (tabela da verdade)
+- **32-bit Bedrock sweep** — `seedfinder_crack` (engine in `seedfinder_wrapper.c` + `crack_mt.c`), multi-threaded (Win32 threads on Windows, pthreads elsewhere), inside a time budget.
+- **SIMD**: `crack_simd.h` is the single source of truth — AVX2 8-lane on x86, WASM SIMD128 4-lane, scalar fallback; runtime dispatch via `crackSimdDetect()`. `CRACK_GROUPS` is per-ISA (16 on x86 GCC/AVX2, 4 on WASM — higher spills in linear memory). `crack_mt_block` uses a rolling window (`array[0..4]` + `array[397..400]`, not the full 401-word array) so high `GROUPS` fits in cache.
+- **64-bit** (`crack64.c`, export `seedfinder_crack64_shim`): 4-stage pipeline. `span < 2^32` → **bounded** (2^48 residual window); `span ≥ 2^32` → **full-range** (lo32 sweep → Java lift 32→48 → hi16 biome lift). Full-range needs *near-exact* Java anchors; sampled + post-lift guards return an actionable error (pass a `start`/`end` window or exact Trial Chambers/Trail Ruins coords) instead of hanging. `MAX_MAX_SECONDS_64 = 2400`. Empirical basis: `docs/verification/bedrock64-empirical.md`.
+- **Negative seeds**: the auto-mode `lift63` (`crack_auto.c`) sweeps `hi ∈ [0, 2^16)` (not `2^15`), so it covers the signed half (bit 63) and returns the complete Bedrock seed `-N` — a negative-seed world used to come back empty/partial. The 32-bit HTTP sweep still prints unsigned (`%llu`); the native `crack64` still clamps `endSeed` at `1<<63` (the site never hits it).
+- **Anchor block convention** (`anchor48Build`, `core/crack64.c`): the target chunk is `(block >> 4) - 1`, the same space as `javaChunk` (`(getStructurePos - 8) >> 4`). It accepts both the block a player reads (`/tp` = corner + 8) and the raw corner. The old `(block - 8) >> 4` was one chunk off for `/tp` blocks (true seed scored 4 instead of 0, tolerance 0 failed).
+- **Java** (`crack_java.c`): 48-bit cracker + dispatch to **MITM** (`crack_mitm.c`, Matthew Bolan `mjtb49` clean-room reimplementation) for `tolerance 0` + uniform non-power-of-2 structures; final confirmation by `javaCheckSeed` (zero false positives). `MAX_MAX_SECONDS_JAVA = 2400`. The tolerant full-range lift was **removed as unsound** — full-range `tolerance > 0` now returns an actionable error.
+- **Route** (`server/app/seedcracker.py`): `/seedcracker` + `/seedcracker/java` + `/seedcracker/bedrock`. Response is always a **JSON list** — item 0 is a header (`status` `ok`|`partial`|`error`, `checked`, `elapsed_ms`, `timed_out`, …), then `{seed, score, matches}` per candidate. Constraints: 4–24 structures, Mineshaft (15) rejected, tolerance 0–8 (default 6), `max` 500 (cap 2000), `max_seconds` default 30 (32-bit cap 120). 64-bit **auto-detects when `end > 2^32`** (**POST JSON only**; GET stays 32-bit). Each candidate carries `seed_str` (exact decimal — use it above 2^53). Local-only; the hosted site answers `"unavailable"`.
 
-EVERY time the user provides a world seed AND the coordinates of one or more structures, and confirms the data is real, save it to the ground-truth file — which lives **only in the sibling private repo `mineseedfinder`**, never in this repo.
+## Server notes (server/app/)
 
-- **File (JSON, single accumulating file):** `../mineseedfinder/static/wasm/ground_truth.json` — the path is ALWAYS relative to this repo as `../mineseedfinder/...`.
-- **NEVER store ground-truth in this repo.** `SeedFinder` is PUBLIC and `mineseedfinder` is private, so real seeds must not land here: do not create a `ground_truth.json` (or any truth table) under `server/tests/` or anywhere in this repo. When the user reports a real seed + coordinates, edit only the mineseedfinder file. If the sibling repo is not present locally, tell the user instead of creating the file here.
-- **Mandatory confirmation before saving:** ask the user whether that structure/seed is real and where it came from (in-game / ChunkBase / ...). If it is fictitious or just an example, do NOT save it to the ground-truth file.
-- **One entry per seed.** If the user gives structures from DIFFERENT seeds, create a separate entry for each seed — keep every original seed; never merge structures across seeds or drop a seed.
-- **Not circular:** data that came from the seedfinder/SeedCracker itself is NOT independent truth. Only save what the user read in-game or from an external source.
-- Coordinates are in **blocks**; `type` is the cubiomes structure ID; `edition` is `bedrock` | `java` | `bedrock64`.
-- If the seed already exists, append new structures to that entry (no duplicate `type,x,z`).
-- After adding, run the tests that consume the file; if none exists yet, create one that loads `ground_truth.json` and compares it against `/scan`.
+- `native.bootstrap_lib()` runs at **import time** (`__init__.py`) and is best-effort — never raises; a missing lib degrades (`/scan` → 503, `/status` → 500). `index.py main` → `native.load_lib` → `sys.exit(1)` on failure, so `start.bat` exits early. **Always rebuild with `start.bat`**, don't run `index.py` alone after a clean.
+- **Path gotcha**: `_candidates()` auto-discovery looks under `server/build_server/` (and `_MEIPASS` for the frozen exe), but `start.bat` builds the **repo-root** `build_server/` — dev relies on the explicit `--lib-path`.
+- `native.py` binds `seedfinder_scan_java` / `seedfinder_crack*` only `if hasattr` — a stale lib degrades (503 only when Java is requested) instead of killing the app at import.
+- Routes: `GET|POST /status` (alias `/health`), `GET|POST /scan`, `/scan/java`, `/scan/bedrock`; `GET|POST /seedcracker`, `/seedcracker/java`, `/seedcracker/bedrock`; `GET /` landing page (`pages.py`, inline HTML + copy-paste examples).
+- `mc` is the **edition**, not the game version: resolved by first letter (`j…`→java, `b…`→bedrock, absent→bedrock, anything else→400); the fixed `/scan/java` and `/scan/bedrock` paths ignore it. `version` is reserved for a future game-version param that wires into the C `mcLabel` (always `NULL` today) — don't add it without a task.
+- `APP_VERSION` in `console.py` must be bumped per release; the release tag `vX.Y.Z` must match. `console.py` prints an update **notice only** — the old auto-updater was removed (AV false-positive signal); don't re-add it.
+- The sibling `mineseedfinder` repo has an independent copy of the scan handler with env-configurable caps (`SEEDFINDER_MAX_RADIUS`/`SEEDFINDER_MAX_RESULTS`). The copies are independent — don't "sync" them without a task.
 
-Schema:
+## WASM (browser build)
+
+- `wasm/CMakeLists.txt` compiles the core `.c` files + cubiomes + `Bfinders.c` **directly** (no DLL link) with Emscripten into `wasm/out/seedfinder.{wasm,js}`. The `core/crack_mt.c` entry is mandatory or the link fails on `sweepMtSurvivors`/`crackScoreSimd`.
+- Toolchain gotchas (see comments in `wasm/CMakeLists.txt`): the link stays at `-O1` because the MSYS2 `wasm-opt`/binaryen pass wedges on Windows; the `.bat` must use `call emcmake` (it is itself a `.bat`) or `cmake --build` never runs; `-msimd128` and `-sSTACK_SIZE=1048576` are required (`CRACK_GROUPS=4`).
+- RNG gotcha: `ChunkBiomesGUI/Brng.h` RNG functions (`_mNext`, `mNextInt`, …) must **not** carry `PURE_FUNC` — they mutate the MersenneTwister and clang CSEs repeated same-pointer calls under optimization, making the RNG repeat values (commit `4165bcb`). Don't re-add the attribute.
+- Emscripten path: `seedfinder_crack` and `sweep48MT` have an `#if defined(__EMSCRIPTEN__)` branch forcing `numThreads = 1` inline (the WASM build has no `-pthread`); JS parallelizes via Web Workers. Keep it compiling when refactoring.
+- ABI: `WASM_BIGINT` (seeds are **BigInt**), input coords are **blocks** (not chunks), `_seedfinder_free_result(ptr)` is mandatory on every return, and the call is synchronous/blocking — run it in a worker and use `timeBudgetSec`. `wasm/INTEGRATION.md` is the self-contained consuming reference (ABI tables, worker scheduler, guards).
+
+## Tests
+
+### Python (`server/tests/`)
+
+11 assert-based scripts, run **directly** (no pytest/framework), plus `fixtures_crack64.json` (real Chunkbase field data for seed 4294972605). Most hardcode the Windows `build_server\seedfinder_lib.dll`; Flask-client tests force it via `native.load_lib(...)` **after** `create_app()` because the factory re-runs `bootstrap_lib()`.
+
+- `python server/tests/test_native_crack.py` — ctypes smoke of `seedfinder_crack`; recovers fixtures 8675309 / 31415.
+- `python server/tests/test_seedcracker.py` — Flask client: 400 gates, Mineshaft rejection, seed 8675309, object/list/GET/chunks forms.
+- `python server/tests/test_seedcracker_java.py` — Java routes, `mc` dispatch, mode64-on-java 400, tolerant-lift guard, MITM recovery.
+- `test_scan_api.py`, `test_scan64.py`, `test_scan_java_native.py`, `test_scan_village_groundtruth.py` (seed-6666 regression), `test_crack64_api.py`, `test_crack_auto.py`, `test_mitm_window.py`, `test_biome_grid.py`.
+- Opt-in (slow) paths: `SEEDFINDER_FULL_RANGE_TEST=1` (full-range 64-bit) and `SEEDFINDER_AUTO_E2E=1` (auto E2E).
+
+### C harnesses (`core/test_*.c`)
+
+**Not built by any CMake target** — each is standalone with a compile-command comment header. Run manually: `test_mitm.c`, `test_mitm_world.c`, `test_crack_java.c`, `test_crack64.c` (parity vs cubiomes; `SEEDFINDER_FULL_RANGE_TEST=1` → `FULL_RANGE_OK`), `test_viability.c`, `test_invariants.c`, `test_java_tol.c`, `test_bridge.c` (needs the root tree + MinGW64 Lua; not run by `start.bat`).
+
+## Ground truth (tabela da verdade)
+
+When the user provides a world seed **and** structure coordinates and confirms the data is real, save it to the ground-truth file — which lives **only in the sibling private repo `mineseedfinder`**, never in this (public) repo.
+
+- **File:** `../mineseedfinder/static/wasm/ground_truth.json` (path always relative to this repo as `../mineseedfinder/...`).
+- **Never store truth in this repo.** Do not create a `ground_truth.json` (or any truth table) under `server/tests/` or anywhere here. If the sibling repo isn't present locally, tell the user instead of creating the file here.
+- **Confirm first:** ask the user whether the seed/structures are real and where they came from (in-game / ChunkBase / …). Fictitious or example data is **not** saved.
+- Data produced by seedfinder/SeedCracker itself is **not** independent truth (not circular). Only save what the user read in-game or from an external source.
+- **One entry per seed.** Structures from different seeds get separate entries — never merge across seeds or drop a seed. If the seed exists, append new structures (no duplicate `type,x,z`).
+- Coordinates are **blocks**; `type` is the cubiomes structure ID; `edition` is `bedrock` | `java` | `bedrock64`.
+- After adding, run the tests that consume the file (create one if none exists that loads `ground_truth.json` and compares it against `/scan`).
 
 ```json
 {
@@ -196,10 +160,7 @@ Schema:
 
 ## Conventions worth knowing
 
-- **Edition dispatch**: `/scan/java` and `/scan/bedrock` fix the edition and **silently ignore** `mc`; `/scan` resolves `mc` by its **first letter** (`j…` → java, `b…` → bedrock, case-insensitive; anything else → 400; absent → `bedrock`). GET reads the query string, POST reads only the JSON body (same keys; non-object body → 400). The response shape is identical across editions. `native.py` binds `seedfinder_scan_java` only `if hasattr` so a stale lib degrades to a 503 **only** when Java is requested. The param is named `mc` (edition) and **not** `version`, so a future game-version param can use `version` without a breaking rename; the `mcLabel` C argument is always `NULL` from the server — that future param wires into it (`str2mc`), so do not add it without a new task.
-- **Structure type IDs** are integers defined by cubiomes; the Lua module keeps the canonical human-readable list in `STRUCTURE_TYPES`. If you add a structure type, update `STRUCTURE_TYPES` in `SeedFinder.lua` and verify cubiomes recognises the ID via `getBedrockStructureConfig`. The `/scan` endpoint's `types=` param is a comma-separated list of these IDs. SeedCracker keeps its own crackable-type list (`STRUCTURE_NAMES` in `server/app/seedcracker.py`) — a scan-only type does not automatically become crackable.
-- Native-lib loading is best-effort and never raises during import. CLI runs (`index.py main` → `native.load_lib`) `sys.exit(1)` when the lib is missing or fails to load, so `server/start.bat` exits early. If the lib never loads, `/scan` returns 503 and `/status` returns 500. Always rebuild with `server/start.bat` rather than running `index.py` alone after a clean.
-- `seedfinder_scan` returns a pointer that the caller **must free via `seedfinder_free_result`**. Servers do this in a `finally` block — keep that ordering if refactoring.
-- **Input clamps on `/scan`**: this repo's `server/app/api.py` hardcodes `radius = min(radius, 1000)` and `max_results = min(max_results, 1000)` to prevent DoS via large iter regions. Keep these limits in place across all entrypoints. **Cross-repo note:** the sibling `mineseedfinder` repo has its own copy of this handler and moved to env-configurable caps (`SEEDFINDER_MAX_RADIUS`=200 / `SEEDFINDER_MAX_RESULTS`=100, then `min()`-clamped). The two server copies are independent — don't "fix" one to match the other without a task.
-- **Bedrock biome gate** (`structureIsViable` in `core/seedfinder_wrapper.c` + `bedrockViableBiome` in `core/viability.c`): viability is checked at the structure's own cell (`getBiomeAt(g,0,(x>>4)*4+2,319>>2,(z>>4)*4+2)`), with a per-type table. Do NOT use cubiomes' `isViableStructurePos` gate as the only filter - it is Java-style (samples the bounding-box corner via the Java LCG) and lets river/swamp/ocean through. The old Outpost-only hack was generalized. Regression: `seed=6666`, radius 100, `types=5` (`server/tests/test_scan_village_groundtruth.py`).
-- **CLAUDE.md itself is listed in `.gitignore`**. If you intend to commit it, that line needs to go.
+- **Structure type IDs** are cubiomes integers. If you add a type, update `STRUCTURE_TYPES` in `script/SeedFinder.lua` and verify cubiomes recognises the ID. SeedCracker keeps its own crackable list (`STRUCTURE_NAMES` in `server/app/seedcracker.py`) — a scan-only type is not automatically crackable.
+- `CLAUDE.md` is listed in `.gitignore`; `AGENTS.md` is tracked. Keep the tracked/ignored boundary in mind before staging.
+- Do **not** commit anything under `wasm/` (fully untracked) or `docs/` — the one tracked exception is `docs/verification/bedrock64-empirical.md`.
+- `build_server/` artifacts are gitignored. The Windows packaged artifact is `server/dist/SeedFinder.exe`.
