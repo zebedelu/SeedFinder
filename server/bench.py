@@ -274,10 +274,20 @@ def staleness_warnings(dll_mtime, core_mtime, wasm_mtime=None):
     return out
 
 
-def run_native(fixture, window, repeat, lib, full=False):
-    """Roda o modo da fixture `repeat` vezes e devolve as linhas da mediana."""
+def default_threads():
+    """Padrao do lado nativo: cpu_count - 1 (mesma escolha de sempre)."""
+    return max(1, (os.cpu_count() or 4) - 1)
+
+
+def run_native(fixture, window, repeat, lib, full=False, threads=None):
+    """Roda o modo da fixture `repeat` vezes e devolve as linhas da mediana.
+
+    `threads` vale para as fases que RECEBEM o argumento (crack32 e auto sweep);
+    None usa o padrao (cpu_count - 1). A fase mitm mantem o 1 fixo de sempre."""
     name = fixture["name"]
-    threads = max(1, (os.cpu_count() or 4) - 1)
+    if threads is None:
+        threads = default_threads()
+    threads = max(1, int(threads))
     rows = []
 
     if fixture["mode"] == "bedrock32":
@@ -567,6 +577,9 @@ def main():
     ap = argparse.ArgumentParser(description="Benchmark nativo x WASM (F0)")
     ap.add_argument("--repeat", type=_positive_int, default=3,
                     help="repeticoes por fase (>= 1)")
+    ap.add_argument("--threads", type=_positive_int, default=None,
+                    help="threads das fases de varredura nativa (crack32/auto "
+                         "sweep); padrao cpu_count - 1")
     ap.add_argument("--window", type=lambda s: int(s, 0), default=DEFAULT_WINDOW)
     ap.add_argument("--full", action="store_true", help="varre o espaco inteiro")
     ap.add_argument("--wasm", action="store_true", help="inclui o build WASM (node)")
@@ -577,6 +590,7 @@ def main():
     bench_fixtures.validate()
     chosen = ([n for n in args.fixtures.split(",") if n] if args.fixtures
               else bench_fixtures.names())
+    native_threads = args.threads if args.threads is not None else default_threads()
 
     path = find_lib()
     global _lib_handle
@@ -592,10 +606,11 @@ def main():
         "wasm_mtime": os.path.getmtime(wasm) if have_wasm else None,
         "python": platform.python_version(),
         "cpu_count": os.cpu_count(),
+        "threads": native_threads,
         "window": (1 << 32) if args.full else args.window,
         "repeat": args.repeat,
     }
-    print(f"lib: {meta['dll']} ({meta['dll_bytes']} B)  threads=native cpu-1")
+    print(f"lib: {meta['dll']} ({meta['dll_bytes']} B)  threads={native_threads}")
 
     # Artefato velho vs core/ invalida os numeros (a ABI do modo auto mudou em
     # 980b406 e uma DLL velha fazia o auto64 falhar inteiro, em silencio).
@@ -607,7 +622,8 @@ def main():
     for name in chosen:
         fx = bench_fixtures.load(name)
         space = fx["space"] if args.full else min(args.window, fx["space"])
-        for row in run_native(fx, space, args.repeat, _lib_handle, args.full):
+        for row in run_native(fx, space, args.repeat, _lib_handle, args.full,
+                              native_threads):
             row["space"] = space
             full_ms = extrapolate(row, fx["space"])
             row["extrapolated_full_ms"] = None if full_ms is None else round(full_ms, 1)

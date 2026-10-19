@@ -314,7 +314,9 @@ static void *mtSweepWorker(void *arg) {
 MtSweepResult sweepMtSurvivors(const CrackTarget *targets, int nTargets,
                                uint64_t start, uint64_t end,
                                double budgetSec, int numThreads, U64Vec *out) {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(SEEDFINDER_WASM_PTHREAD)
+    /* Sem -pthread o pthread_create aborta em runtime. SEEDFINDER_WASM_PTHREAD
+       (build experimental) remove esta guarda e habilita o pool de threads. */
     numThreads = 1;
 #endif
     MtSweepResult r = {0, 0, numThreads < 1 ? 1 : numThreads};

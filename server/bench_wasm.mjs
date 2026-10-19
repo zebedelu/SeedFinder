@@ -18,6 +18,10 @@ if (!fixturesPath) {
   console.error("--fixtures <path> obrigatorio");
   process.exit(2);
 }
+// Threads das fases de varredura (crack32/auto sweep). Padrao 1: o build de
+// producao nao tem -pthread, entao >1 so' faz sentido no build experimental
+// (SEEDFINDER_WASM_PTHREAD=ON). Sem --threads o comportamento e' o de sempre.
+const threads = Number(argOf("--threads", "1"));
 const payload = JSON.parse(readFileSync(fixturesPath, "utf8"));
 // `full` vem do bench.py: sem ele o java_mitm mediria u_timing enquanto o lado
 // nativo mede [0, 2^24) - janelas diferentes na mesma linha da tabela.
@@ -106,8 +110,8 @@ for (const fx of payload.fixtures) {
     const pX = f64Array(fx.structures.map((s) => s.x));
     const pZ = f64Array(fx.structures.map((s) => s.z));
     const { data, ms } = call(m._seedfinder_crack, [pT, pX, pZ], pT, n, pX, pZ,
-      fx.tolerance, BigInt(0), BigInt(space), 2000, 3600.0, 1);
-    rows.push(row(fx.name, "crack32", "seeds", 1, data.checked || 0, ms, data));
+      fx.tolerance, BigInt(0), BigInt(space), 2000, 3600.0, threads);
+    rows.push(row(fx.name, "crack32", "seeds", threads, data.checked || 0, ms, data));
     continue;
   }
   if (fx.mode === "auto") {
@@ -127,8 +131,8 @@ for (const fx of payload.fixtures) {
     const jTol = intArray(jv.map(() => fx.tolerance));
     try {
       const sweep = call(m._seedfinder_crack_auto_sweep, [],
-        pT, mt.length, pX, pZ, pTol, BigInt(0), BigInt(space), 2000, 3600.0, 1);
-      rows.push(row(fx.name, "sweep", "seeds", 1, sweep.data.checked || 0,
+        pT, mt.length, pX, pZ, pTol, BigInt(0), BigInt(space), 2000, 3600.0, threads);
+      rows.push(row(fx.name, "sweep", "seeds", threads, sweep.data.checked || 0,
         sweep.ms, sweep.data));
       if (sweep.data.error) continue;  // sem sweep nao ha fase 2/3 a medir
 

@@ -40,8 +40,9 @@ char *seedfinder_crack_auto_sweep(
                           targets, &n, &err))
         return err;
 
-#if defined(__EMSCRIPTEN__)
-    /* Sem -pthread: uma fatia por Web Worker (mesmo caminho do seedfinder_crack). */
+#if defined(__EMSCRIPTEN__) && !defined(SEEDFINDER_WASM_PTHREAD)
+    /* Sem -pthread: uma fatia por Web Worker (mesmo caminho do seedfinder_crack).
+       SEEDFINDER_WASM_PTHREAD (build experimental) remove a guarda e habilita o pool. */
     numThreads = 1;
 #endif
     if ((endSeed - startSeed) < (uint64_t)numThreads)

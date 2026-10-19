@@ -127,9 +127,10 @@ static void *sweep48Worker(void *arg) {
 
 Sweep48Result sweep48MT(const Anchor48 *a, uint64_t start, uint64_t end,
                         double budgetSec, int numThreads, U64Vec *out) {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(SEEDFINDER_WASM_PTHREAD)
     // Sem -pthread o pthread_create aborta em runtime; o JS paraleliza
     // via Web Workers (uma fatia [start,end) por worker). Igual ao crack 32.
+    // SEEDFINDER_WASM_PTHREAD (build experimental) remove a guarda e habilita o pool.
     numThreads = 1;
 #endif
     Sweep48Result r = {0, 0, numThreads < 1 ? 1 : numThreads};
@@ -194,8 +195,9 @@ void liftJavaHi(const Anchor48 *anc, const U64Vec *lo32s, double deadline,
                 int numThreads, U64Vec *out, int *timedOut) {
     *timedOut = 0;
     out->n = 0;
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(SEEDFINDER_WASM_PTHREAD)
     // Sem -pthread: worker inline (o JS fatia por Web Workers). Idem crack 32.
+    // SEEDFINDER_WASM_PTHREAD (build experimental) remove a guarda e habilita o pool.
     numThreads = 1;
 #endif
     if (numThreads < 1) numThreads = 1;

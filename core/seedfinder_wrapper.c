@@ -327,9 +327,10 @@ SEEDFINDER_API char *seedfinder_crack(
     /* Strongest filter first. */
     qsort(targets, n, sizeof(CrackTarget), crackTargetCompare);
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(SEEDFINDER_WASM_PTHREAD)
     /* Sem -pthread o pthread_create aborta em runtime; o JS paraleliza
-       via Web Workers (uma fatia [startSeed,endSeed) por worker). */
+       via Web Workers (uma fatia [startSeed,endSeed) por worker).
+       SEEDFINDER_WASM_PTHREAD (build experimental) remove a guarda e habilita o pool. */
     numThreads = 1;
 #endif
     if ((endSeed - startSeed) < (uint64_t)numThreads)

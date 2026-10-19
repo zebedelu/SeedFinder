@@ -428,7 +428,9 @@ SEEDFINDER_API char *seedfinder_crack_java(
     if (endSeed > (1ULL << 48)) endSeed = 1ULL << 48;
     if (startSeed >= endSeed) return strdup("{\"error\":\"empty seed range\"}");
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(SEEDFINDER_WASM_PTHREAD)
+    /* Sem -pthread o pthread_create aborta em runtime; o JS paraleliza via Web Workers.
+       SEEDFINDER_WASM_PTHREAD (build experimental) remove a guarda e habilita o pool. */
     numThreads = 1;
 #endif
     if ((endSeed - startSeed) < (uint64_t)numThreads) numThreads = 1;
