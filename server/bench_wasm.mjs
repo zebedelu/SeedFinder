@@ -6,11 +6,8 @@
 // BigInt; arrays uint64_t* vao por HEAP64; _seedfinder_free_result(ptr) e'
 // obrigatorio em TODO retorno (inclusive erro) e as entradas vao por _malloc.
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import createModule from "../wasm/out/seedfinder.js";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const argOf = (name, def) => {
   const i = args.indexOf(name);
@@ -22,6 +19,13 @@ if (!fixturesPath) {
   process.exit(2);
 }
 const payload = JSON.parse(readFileSync(fixturesPath, "utf8"));
+// `full` vem do bench.py: sem ele o java_mitm mediria u_timing enquanto o lado
+// nativo mede [0, 2^24) - janelas diferentes na mesma linha da tabela.
+const FULL = Boolean(payload.full);
+
+// Mesmo marcador de guard do bench.py (_ENGINE_GUARD_MARKERS): pedido de mais
+// ancoras e' "nada a medir" (skipped), nao falha de medicao.
+const ENGINE_GUARD = "too many 48-bit candidates";
 
 const m = await createModule();
 
@@ -130,21 +134,47 @@ for (const fx of payload.fixtures) {
 
       const lo32 = (sweep.data.results || []).slice(0, 2000).map((r) => r.seed);
       if (!lo32.length) {
+        // Sem candidatos nao ha o que liftar: skipped (ausencia), nunca chamar
+        // o motor com array vazio (ele recusa e isso seria erro de quem chama).
         rows.push(skipRow(fx.name, "lift48", "candidates", 1,
           "sweep sem candidatos lo32 - fase 2 nao roda"));
+        rows.push(skipRow(fx.name, "lift48_rank1", "candidates", 1,
+          "sweep sem candidatos lo32 - sem rank-1"));
         rows.push(skipRow(fx.name, "lift63", "hi", 1,
           "sem s48 da fase 3 - lift63 nao roda"));
         continue;
       }
+      // Fase 2: a LISTA inteira (deteccao). Com nLo32 > 1 o s48 sai vazio POR
+      // CONTRATO (core/crack_auto.h): serve para direct32, nao alimenta lift63.
       const pLo = u64Array(lo32);
       const l48 = call(m._seedfinder_crack_auto_lift48, [pLo],
         pT, pX, pZ, pTol, mt.length, pLo, lo32.length,
         jT, jX, jZ, jTol, jv.length, 2000);
-      rows.push(row(fx.name, "lift48", "candidates", 1, lo32.length, l48.ms, l48.data));
+      const l48Row = row(fx.name, "lift48", "candidates", 1, lo32.length,
+        l48.ms, l48.data);
+      if (!l48.data.error && lo32.length > 1) {
+        l48Row.note = "s48 vazio por contrato (nLo32 > 1): a fase 2 so' produz direct32";
+      }
+      rows.push(l48Row);
 
-      // lift48 so' produz s48 com nLo32 == 1 (a lista inteira e' deteccao pura);
-      // sem s48 o lift63 exige um array nao vazio, entao ele nao roda.
-      const s48 = l48.data.s48 || [];
+      // Fase 3: rank-1 - e' aqui que o lift Java roda. O guard de 1024 candidatos
+      // e' um PEDIDO de mais ancoras (skipped); qualquer outro erro e' falha.
+      const pRank1 = u64Array([lo32[0]]);
+      const rank1 = call(m._seedfinder_crack_auto_lift48, [pRank1],
+        pT, pX, pZ, pTol, mt.length, pRank1, 1,
+        jT, jX, jZ, jTol, jv.length, 2000);
+      const guarded = Boolean(rank1.data.error) &&
+        String(rank1.data.error).includes(ENGINE_GUARD);
+      if (guarded) {
+        rows.push(skipRow(fx.name, "lift48_rank1", "candidates", 1,
+          rank1.data.error));
+      } else {
+        rows.push(row(fx.name, "lift48_rank1", "candidates", 1, 1,
+          rank1.ms, rank1.data));
+      }
+
+      // Fase 4: lift63 so' com o s48 da fase 3 - nunca com array vazio.
+      const s48 = guarded ? [] : (rank1.data.s48 || []);
       if (!s48.length) {
         rows.push(skipRow(fx.name, "lift63", "hi", 1,
           "sem s48 da fase 3 - lift63 nao roda"));
@@ -166,7 +196,7 @@ for (const fx of payload.fixtures) {
     const pT = intArray(fx.structures.map((s) => s.type));
     const pX = f64Array(fx.structures.map((s) => s.x));
     const pZ = f64Array(fx.structures.map((s) => s.z));
-    const [a, b] = fx.u_timing;
+    const [a, b] = FULL ? [0, fx.space] : fx.u_timing;
     const { data, ms } = call(m._seedfinder_crack_mitm_window, [pT, pX, pZ],
       pT, n, pX, pZ, 50, 3600.0, 1, BigInt(a), BigInt(b));
     rows.push(row(fx.name, "mitm", "u", 1, b - a, ms, data));

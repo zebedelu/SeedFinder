@@ -1,6 +1,8 @@
 """Testes do benchmark F0 - run with: python server/tests/test_bench.py"""
 import argparse
+import contextlib
 import ctypes
+import io
 import json
 import os
 import sys
@@ -348,6 +350,133 @@ def test_wasm_runner_degrades_without_build():
         del os.environ["SEEDFINDER_BENCH_NO_WASM"]
 
 
+class _FakeRun:
+    """CompletedProcess de mentira: so' o que run_wasm le'."""
+
+    def __init__(self, returncode, stdout, stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+@contextlib.contextmanager
+def _stub_wasm(calls, results, build=True, raise_exc=None):
+    """bench.ROOT num diretorio temporario + subprocess.run stubado: testa o
+    caminho do runner sem precisar do build WASM nem do Node."""
+    with tempfile.TemporaryDirectory() as tmp:
+        if build:
+            # Um "build" de mentira: run_wasm so' confere que os arquivos existem.
+            os.makedirs(os.path.join(tmp, "wasm", "out"))
+            os.makedirs(os.path.join(tmp, "server"))
+            for rel in (("wasm", "out", "seedfinder.js"), ("server", "bench_wasm.mjs")):
+                with open(os.path.join(tmp, *rel), "w", encoding="utf-8"):
+                    pass
+        orig_root, orig_run = bench.ROOT, bench.subprocess.run
+
+        def fake_run(*a, **k):
+            calls.append(a)
+            if raise_exc is not None:
+                raise raise_exc
+            return results[min(len(calls) - 1, len(results) - 1)]
+
+        bench.ROOT, bench.subprocess.run = tmp, fake_run
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                yield tmp
+        finally:
+            bench.ROOT, bench.subprocess.run = orig_root, orig_run
+
+
+_FX32 = {"name": "bedrock32", "mode": "bedrock32"}
+
+
+def test_wasm_runner_failure_is_error_row_not_none():
+    # Runner quebrado nao pode SUMIR do artefato: exit != 0 vira linha invalida
+    # com o codigo e o stderr (o stderr nao faz parte do JSON/markdown).
+    calls = []
+    with _stub_wasm(calls, [_FakeRun(1, "not json{", "boom\nline 2")]):
+        rows = bench.run_wasm(_FX32, 1 << 20)
+    assert isinstance(rows, list) and len(rows) == 1, rows
+    r = rows[0]
+    assert r["runner"] == "wasm" and r["valid"] is False, r
+    assert r["checked"] == 0 and r["elapsed_ms"] == 0.0, r
+    assert bench.rate(r) == 0.0, r
+    assert "exit 1" in r["error"] and "boom" in r["error"], r
+    assert "**erro:" in bench.render_markdown([r])
+
+    # stdout vazio ou que nao e' a lista de linhas tambem nao pode virar None.
+    for bad_stdout in ("", "   ", '{"oi":1}', "[]"):
+        with _stub_wasm([], [_FakeRun(0, bad_stdout)]):
+            rows = bench.run_wasm(_FX32, 1 << 20)
+        assert isinstance(rows, list) and rows[0]["valid"] is False, (bad_stdout, rows)
+
+    # None SO' sem build...
+    with _stub_wasm([], [], build=False):
+        assert bench.run_wasm(_FX32, 1 << 20) is None
+    # ...ou sem node no PATH.
+    with _stub_wasm([], [], raise_exc=FileNotFoundError()):
+        assert bench.run_wasm(_FX32, 1 << 20) is None
+
+
+def test_wasm_runner_repeats_and_reduces_with_median():
+    def one(checked, ms):
+        return json.dumps([{"runner": "wasm", "fixture": "bedrock32",
+                            "phase": "crack32", "unit": "seeds", "threads": 1,
+                            "checked": checked, "elapsed_ms": ms,
+                            "timed_out": False, "valid": True}])
+
+    calls = []
+    results = [_FakeRun(0, one(100, 1000.0)),    # 100/s
+               _FakeRun(0, one(400, 1000.0)),    # 400/s
+               _FakeRun(0, one(400, 2000.0))]    # 200/s
+    with _stub_wasm(calls, results):
+        rows = bench.run_wasm(_FX32, 1 << 20, repeat=3)
+    assert len(calls) == 3, calls                # uma execucao do node por repeticao
+    assert len(rows) == 1, rows
+    assert bench.rate(rows[0]) == 200.0, rows[0]  # mediana, igual ao lado nativo
+    assert rows[0]["space"] == 1 << 20, rows[0]
+    assert rows[0]["extrapolated_full_ms"] is None, rows[0]
+
+
+def test_wasm_reduce_keeps_phase_order_and_skips():
+    def r(phase, checked, ms, **kw):
+        row = {"runner": "wasm", "fixture": "auto64", "phase": phase, "unit": "u",
+               "threads": 1, "checked": checked, "elapsed_ms": ms,
+               "timed_out": False, "valid": True}
+        row.update(kw)
+        return row
+
+    def skip(phase, note):
+        return r(phase, 0, 0.0, valid=False, skipped=True, note=note)
+
+    runs = [[r("sweep", 100, 1000.0), r("lift48", 2, 10.0),
+             skip("lift48_rank1", "too many 48-bit candidates (3229)"),
+             skip("lift63", "sem s48 da fase 3 - lift63 nao roda")],
+            [r("sweep", 200, 1000.0), r("lift48", 4, 10.0),
+             r("lift48_rank1", 1, 500.0), r("lift63", 8, 1000.0)]]
+    rows = bench._reduce_wasm_runs(runs)
+    assert [x["phase"] for x in rows] == ["sweep", "lift48", "lift48_rank1",
+                                          "lift63"], rows
+    assert bench.rate(rows[0]) == 200.0, rows[0]     # mediana das taxas
+    # A execucao que MEDIU vence a que so' pulou: medicao real nao se descarta.
+    assert rows[2]["valid"] is True and bench.rate(rows[2]) == 2.0, rows[2]
+    assert rows[3]["checked"] == 8, rows[3]
+    # Fase que so' foi skipped em todas as execucoes continua skipped.
+    only_skip = [[skip("lift63", "sem s48 da fase 3"), skip("lift63", "sem s48 da fase 3")]]
+    assert bench._reduce_wasm_runs(only_skip)[0].get("skipped") is True
+
+
+def test_wasm_timeout_covers_engine_budget():
+    # O subprocesso nao pode morrer antes do proprio orcamento do motor acabar:
+    # o engine tem de chegar a reportar `timed_out` (o JS passa FULL_BUDGET por
+    # chamada com orcamento, como o nativo).
+    assert bench._wasm_timeout("bedrock32", 3) > 3 * bench.FULL_BUDGET
+    assert bench._wasm_timeout("auto", 1) > 2 * bench.FULL_BUDGET   # sweep + lift63
+    assert bench._wasm_timeout("java_mitm", 1) > bench.FULL_BUDGET
+    assert bench._wasm_timeout("modo_novo", 1) > bench.FULL_BUDGET  # 1 chamada
+    assert bench._wasm_timeout("bedrock32", 2) > bench._wasm_timeout("bedrock32", 1)
+
+
 def main():
     for fn in (test_names_and_shape, test_bedrock32_fixture,
                test_auto64_fixture_has_anchor, test_java_mitm_fixture,
@@ -365,7 +494,11 @@ def main():
                test_phase3_null_pointer_is_error_not_skip,
                test_repeat_must_be_positive,
                test_wasm_out_gets_esm_package_json,
-               test_wasm_runner_degrades_without_build):
+               test_wasm_runner_degrades_without_build,
+               test_wasm_runner_failure_is_error_row_not_none,
+               test_wasm_runner_repeats_and_reduces_with_median,
+               test_wasm_reduce_keeps_phase_order_and_skips,
+               test_wasm_timeout_covers_engine_budget):
         fn()
         print(f"  ok  {fn.__name__}")
     print("test_bench (fixtures): OK")

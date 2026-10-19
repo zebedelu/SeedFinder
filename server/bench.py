@@ -392,7 +392,67 @@ def run_native(fixture, window, repeat, lib, full=False):
     raise ValueError(f"modo desconhecido: {fixture['mode']}")
 
 
-WASM_RUNNER_TIMEOUT = 900.0
+WASM_RUNNER_MARGIN = 300.0
+# Chamadas com orcamento proprio no runner WASM (o JS passa FULL_BUDGET por fase,
+# como o nativo): o subprocesso TEM de sobreviver a elas para o motor conseguir
+# reportar o proprio `timed_out` em vez de ser morto de fora.
+_WASM_BUDGETED_CALLS = {"bedrock32": 1, "auto": 2, "java_mitm": 1}
+
+
+def _wasm_timeout(mode, repeat):
+    """Timeout do subprocesso derivado do orcamento do motor (por chamada) x
+    repeticoes, com margem para startup/drenagem do Node."""
+    calls = _WASM_BUDGETED_CALLS.get(mode, 1)
+    return WASM_RUNNER_MARGIN + max(1, repeat) * calls * FULL_BUDGET
+
+
+def _stderr_head(stderr, limit=300):
+    """Primeiras linhas uteis do stderr, para caber numa mensagem de erro."""
+    lines = [ln.strip() for ln in (stderr or "").splitlines() if ln.strip()]
+    return (" | ".join(lines) or "(sem stderr)")[:limit]
+
+
+def _wasm_run_error(fixture, out):
+    """Linha de erro para uma execucao que nao entregou rows, ou None se ok.
+
+    Exit != 0, stdout vazio ou stdout que nao e' a lista de linhas viram linha
+    invalida com o motivo: o lado WASM nao pode DESAPARECER do JSON/markdown so'
+    porque o runner quebrou (o stderr nao faz parte do artefato)."""
+    def bad(detail):
+        return _error_row("wasm", fixture["name"], "runner", "-", 0,
+                          f"runner WASM (exit {out.returncode}): {detail}")
+
+    if out.returncode != 0:
+        return bad(_stderr_head(out.stderr))
+    if not out.stdout.strip():
+        return bad("stdout vazio")
+    try:
+        rows = json.loads(out.stdout)
+    except ValueError as e:
+        return bad(f"stdout nao e' JSON ({e})")
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        return bad("stdout nao e' uma lista de linhas")
+    if not rows:
+        return bad("runner nao devolveu nenhuma linha")
+    return None
+
+
+def _reduce_wasm_runs(runs):
+    """Reduz as `repeat` execucoes a uma linha por fase (mediana das taxas).
+
+    Mesma reducao do lado nativo (`median_rows`), que prefere linhas com taxa
+    > 0: duas execucoes que falharam nao jogam fora a terceira que mediu, e uma
+    fase que so' falhou devolve a propria linha invalida. A ordem das fases e' a
+    do runner."""
+    order, grouped = [], {}
+    for run in runs:
+        for r in run:
+            phase = r.get("phase")
+            if phase not in grouped:
+                grouped[phase] = []
+                order.append(phase)
+            grouped[phase].append(r)
+    return [median_rows(grouped[p]) for p in order]
 
 
 def _ensure_wasm_esm(out_dir):
@@ -410,11 +470,14 @@ def _ensure_wasm_esm(out_dir):
     return True
 
 
-def run_wasm(fixture, space):
-    """Roda a fixture no build WASM via node. None = sem build/sem node.
+def run_wasm(fixture, space, repeat=1, full=False):
+    """Roda a fixture `repeat` vezes no build WASM via node e devolve as linhas
+    da mediana. None SO' quando falta build ou Node.
 
     O runner fala JSON em stdout (rows no mesmo formato do lado nativo, com
-    `runner: "wasm"`); logs dele vao para stderr, mostrados so' em falha."""
+    `runner: "wasm"`); logs dele vao para stderr. Falha do runner (exit != 0,
+    stdout vazio/invalido ou timeout) devolve linha de erro - nunca None, senao
+    o lado WASM sumiria do artefato em silencio."""
     if os.environ.get("SEEDFINDER_BENCH_NO_WASM"):
         return None
     js = os.path.join(ROOT, "wasm", "out", "seedfinder.js")
@@ -426,24 +489,30 @@ def run_wasm(fixture, space):
     os.makedirs(OUT_DIR, exist_ok=True)
     fx_path = os.path.join(OUT_DIR, "fixtures.json")
     with open(fx_path, "w", encoding="utf-8") as f:
-        json.dump({"fixtures": [fixture], "space": space}, f)
-    try:
-        out = subprocess.run(["node", runner, "--fixtures", fx_path],
-                             capture_output=True, text=True,
-                             timeout=WASM_RUNNER_TIMEOUT)
-    except FileNotFoundError:
-        print("  wasm: node nao encontrado no PATH - pulando")
-        return None
-    except subprocess.TimeoutExpired:
-        # Timeout e' falha de medicao, nao "build ausente": vira linha invalida
-        # para nao sumir do relatorio nem derrubar os outros runners.
-        print(f"  wasm: runner excedeu {WASM_RUNNER_TIMEOUT:.0f}s - abortado")
-        return [_error_row("wasm", fixture["name"], "runner", "-", 0,
-                           f"runner WASM excedeu {WASM_RUNNER_TIMEOUT:.0f}s")]
-    if out.returncode != 0:
-        print(f"  wasm: runner falhou ({out.returncode}): {out.stderr.strip()[:300]}")
-        return None
-    rows = json.loads(out.stdout)
+        # O modo vai no payload: o runner precisa medir a MESMA janela do
+        # nativo (java_mitm com --full usa [0, 2^24), nao u_timing).
+        json.dump({"fixtures": [fixture], "space": space, "full": bool(full)}, f)
+    timeout = _wasm_timeout(fixture.get("mode"), repeat)
+    runs = []
+    for _ in range(max(1, repeat)):
+        try:
+            out = subprocess.run(["node", runner, "--fixtures", fx_path],
+                                 capture_output=True, text=True, timeout=timeout)
+        except FileNotFoundError:
+            print("  wasm: node nao encontrado no PATH - pulando")
+            return None
+        except subprocess.TimeoutExpired:
+            # Timeout e' falha de medicao, nao "build ausente": vira linha
+            # invalida para nao sumir do relatorio nem derrubar os outros runners.
+            print(f"  wasm: runner excedeu {timeout:.0f}s - abortado")
+            return [_error_row("wasm", fixture["name"], "runner", "-", 0,
+                               f"runner WASM excedeu {timeout:.0f}s")]
+        error = _wasm_run_error(fixture, out)
+        if error:
+            # A linha de erro e' o registro (o main a imprime); nada de None.
+            return [error]
+        runs.append(json.loads(out.stdout))
+    rows = _reduce_wasm_runs(runs)
     for r in rows:
         r["space"] = space
         r["extrapolated_full_ms"] = None
@@ -546,12 +615,13 @@ def main():
             _print_row(name, row)
 
     # WASM so' depois do nativo: os dois lados competem pela mesma CPU, e um
-    # runner lento (ou ausente) nao pode contaminar a medicao nativa.
+    # runner lento (ou ausente) nao pode contaminar a medicao nativa. Mesmo
+    # `--repeat` dos dois lados: mediana das taxas (median_rows).
     if args.wasm:
         for name in chosen:
             fx = bench_fixtures.load(name)
             space = fx["space"] if args.full else min(args.window, fx["space"])
-            for row in run_wasm(fx, space) or []:
+            for row in run_wasm(fx, space, args.repeat, args.full) or []:
                 row["space"] = space
                 row["extrapolated_full_ms"] = None
                 rows.append(row)
