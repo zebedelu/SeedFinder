@@ -292,6 +292,29 @@ SEEDFINDER_API char *seedfinder_biome_palette(void)
     return buf;
 }
 
+/* Biomas esparsos: um biome por ponto em BLOCOS (mesma resolução 1:4 do
+ * seedfinder_biome_grid). Faz o mesmo sampleBiomeNoise que o caminho de
+ * escala 4 de genBiomeNoise3D (flags 0, dat NULL), então o resultado é
+ * idêntico ao da grade — só não gera as células que ninguém pediu.
+ *  y: altura em unidades 1:4 (use 79).
+ *  out: buffer do chamador com n ints.
+ * Retorna 0 ok, -1 args inválidos. */
+SEEDFINDER_API int seedfinder_biome_samples(uint64_t seed,
+    const int *xBlocks, const int *zBlocks, int n, int y, int *out)
+{
+    if (!xBlocks || !zBlocks || !out || n <= 0 || n > 1000000)
+        return -1;
+
+    Generator g;
+    setupGenerator(&g, MC_NEWEST, 0);
+    applySeed(&g, DIM_OVERWORLD, seed);
+
+    for (int i = 0; i < n; i++)
+        out[i] = sampleBiomeNoise(&g.bn, NULL,
+            floorDiv(xBlocks[i], 4), y, floorDiv(zBlocks[i], 4), NULL, 0);
+    return 0;
+}
+
 /* ============================ SeedCracker ============================ */
 
 #include "platform_threads.h"
