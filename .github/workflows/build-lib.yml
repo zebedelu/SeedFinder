@@ -34,7 +34,8 @@ jobs:
           native.load_lib("build_server/seedfinder_lib.so")
           assert native.lib is not None, "native lib not loaded"
           for sym in ("seedfinder_crack", "seedfinder_crack64_shim",
-                      "seedfinder_scan_java"):
+                      "seedfinder_scan_java", "seedfinder_biome_grid",
+                      "seedfinder_biome_palette", "seedfinder_biome_samples"):
               assert hasattr(native.lib, sym), f"missing symbol: {sym}"
           c = app.test_client()
           r = c.get("/status")
