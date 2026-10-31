@@ -1187,7 +1187,7 @@ int isViableFeatureBiome(int mc, int structureType, int biomeID)
         return biomeID == desert || biomeID == desert_hills;
 
     case Jungle_Pyramid:
-        return (biomeID == jungle || biomeID == jungle_hills);
+        return (biomeID == jungle || biomeID == jungle_hills || biomeID == bamboo_jungle || biomeID == bamboo_jungle_hills);
 
     case Swamp_Hut:
         return biomeID == swamp;
